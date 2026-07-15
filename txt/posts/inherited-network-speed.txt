@@ -183,7 +183,7 @@
   of these notes take, one failing version at a time.
 
   --------
-  THE EVIDENCE, IN ONE PLACE (SO YOU CAN REPRODUCE IT)
+  EVIDENCE IN ONE PLACE (SO YOU CAN REPRODUCE IT)
 
   To see it yourself: launch five separate processes, one per address 127.0.0.1 through
   127.0.0.5, each on a non-blocking socket, and for each one count the bytes that are accepted

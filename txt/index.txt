@@ -102,7 +102,7 @@
 
   [Lesson 22: One Request, One Stop — The While Loop Proves It](posts/lesson-22-one-request-one-stop-the-while-loop-proves-it.txt)
     2026-07-15 . special . concurrency, threads, cpp
-    **Exactly one request arrives.** Then someone hits cancel/shutdown. No more requests. **1st second — request arrives:** **Shutdown signal arrives:** **Key insight:** The while loop iterates **twice** for one request + one shutdown: | Iteration | s...
+    **Exactly one request arrives.** Then someone hits cancel/shutdown. No more requests. **1st second — request arrives:** **Shutdown signal arrives:** **Key insight:** The while loop iterates **twice** for one request + one shutdown: File: `experime...
 
   [Lesson 23: Three Requests, One Stop — The Iteration Count](posts/lesson-23-three-requests-one-stop-the-iteration-count.txt)
     2026-07-15 . special . concurrency, threads, cpp
@@ -114,7 +114,7 @@
 
   [Lesson 25: The Periodic Flush — Three Return Paths](posts/lesson-25-the-periodic-flush-three-return-paths.txt)
     2026-07-15 . special . concurrency, threads, cpp
-    Without a timeout, partial `pending_` data sits in RAM until the destructor runs: `cv_.wait(lock, pred)` has **2** return paths: | # | Why it returns | pred | Safe?
+    Without a timeout, partial `pending_` data sits in RAM until the destructor runs: `cv_.wait(lock, pred)` has **2** return paths: `cv_.wait_for(lock, 5s, pred)` has **3** return paths: The bug: path #3 is unhandled.
 
   [Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes](posts/lesson-26-the-contract-why-wait-and-waitfor-are-not-substitutes.txt)
     2026-07-15 . special . concurrency, threads, cpp
@@ -122,7 +122,7 @@
 
   [Lesson 27: — AssignmentSystem: Industry & Academic Validation](posts/lesson-27-assignmentsystem-industry-academic-validation.txt)
     2026-07-15 . special . concurrency, threads, cpp
-    A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`. | Function | What It Does | Lines | |---|---|---| | `assign(conversation_id)` | Finds the agent with lowest `active` count below their `limit`.
+    A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`. **All 5 core logic components are an EXACT MATCH with production systems used by millions of users.** - **What they build:** Thread Pool + Pr...
 
   [Mistake 1: Missing iostream include in v1.cpp](posts/mistake-1-missing-iostream-include-in-v1cpp.txt)
     2026-07-15 . special . network, socket, ipc
@@ -142,7 +142,7 @@
 
   [Mistake 5: open system call parameters](posts/mistake-5-open-system-call-parameters.txt)
     2026-07-15 . special . network, socket, ipc
-    Forgot the mode flags for `open()`. Passing only a filename implicitly tries to read. Writing requires `O_WRONLY | O_CREAT`, and when using `O_CREAT` you must pass the permissions (e.g., `0644`).
+    commit 2e3e08f38c5718f59be8dc7a241b954d01117c37 Author: SysDes Admin <pizza@sysdes.local> Date: Tue Jul 14 21:51:39 2026 +0530 v2 complete. Logs: missing O_TRUNC leaves garbage, write can be partial, open(O_RDONLY) fails if missing.
 
   [Mistake 6: File overwriting and O_TRUNC](posts/mistake-6-file-overwriting-and-otrunc.txt)
     2026-07-15 . special . network, socket, ipc
