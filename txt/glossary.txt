@@ -1,0 +1,33 @@
+@title Glossary :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](index.txt) | [about](about.txt) | [archive](archive.txt) | [glossary](glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  GLOSSARY -- plain term, then the textbook name
+
+  This blog builds each thing from what it does before sticking a label on it. The labels are
+  gathered here, so a term you meet in a paper or a man page maps back to the plain words used
+  in the posts.
+
+  send-window / how much the kernel lets you push before it makes you wait
+      -> TCP congestion window (cwnd)
+
+  the point where the kernel stops doubling the window and starts adding slowly
+      -> slow-start threshold (ssthresh)
+
+  the kernel remembering a route's speed and reusing it for the next connection on that route
+      -> TCP Control Block Interdependence (RFC 2140)
+
+  kernel-side memory that can never be swapped to disk
+      -> non-paged pool
+
+  a socket that refuses to make your thread wait, returning "not ready" instead
+      -> non-blocking socket (O_NONBLOCK / EAGAIN)
+
+  the "too many open files" refusal
+      -> EMFILE (per-process file-descriptor limit reached)
+
+  waiting on many sockets at once with one call
+      -> readiness multiplexing (poll / epoll / IOCP)

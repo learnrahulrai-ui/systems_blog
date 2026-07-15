@@ -1,0 +1,214 @@
+@title Why a Brand-New Process Inherits Another's Network Speed :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- THE KERNEL REMEMBERS A ROUTE YOU NEVER TOUCHED
+  Why a Brand-New Process Inherits Another's Network Speed
+  ============================================================================================
+
+
+  Here is a measurement that should not be possible.
+
+  Start five separate programs, one after another. Each is a brand-new process: fresh memory,
+  fresh sockets, nothing shared. Each connects to a different address -- 127.0.0.1, then
+  127.0.0.2, on up to 127.0.0.5. Each one shoves data at its socket as fast as it can and
+  counts how many bytes it gets in before the kernel says "not now."
+
+  Five clean rooms, five different doors. You expect five unrelated numbers, or five copies
+  of the same number. Instead the second process starts faster than the first, for no reason
+  it could possibly know about. Something outside all five programs is setting their speed.
+
+  This is the whole story of why a blocking socket is never really yours. Let us watch it.
+
+  --------
+  FIRST, WHAT "HOW MANY BYTES BEFORE NOT-NOW" EVEN MEANS
+
+      your process                     kernel
+      -----------                      ------
+      send(buf) --->  [ kernel copies bytes into its own buffer ]  ---> wire
+      send(buf) --->  [ ... buffer fills ... ]
+      send(buf) --->  [ FULL. returns EAGAIN: "not now, try later" ]
+
+  A socket set to non-blocking never makes your thread wait. You call send, and either the
+  kernel accepts the bytes into a buffer of its own, or it hands back the refusal code EAGAIN,
+  meaning "I am full, come back later." (The plain name is a non-blocking socket; EAGAIN is
+  the try-again refusal.)
+
+  So there is a clean number to measure: keep calling send until the first EAGAIN, and add up
+  the bytes that got in. That total is how much the kernel was willing to hold for you before
+  it pushed back. Call it the push capacity.
+
+  --------
+  WHICH MEANS FIVE FRESH PROCESSES SHOULD READ FIVE COLD NUMBERS
+
+      proc A  -> 127.0.0.1   : push until EAGAIN, record total
+      proc B  -> 127.0.0.2   : push until EAGAIN, record total
+      proc C  -> 127.0.0.3   : ...
+      proc D  -> 127.0.0.4
+      proc E  -> 127.0.0.5
+
+  Each process is launched fresh and connects to its own address. None of them ever talks to
+  another. So each should meet the kernel cold and get whatever a cold start gives. Nothing in
+  the code links run B's number to run A's.
+
+  --------
+  BUT THE NUMBERS ARE NOT COLD -- THEY MOVE TOGETHER
+
+      Run 1  (127.0.0.1):  1,064,960 bytes
+      Run 2  (127.0.0.2):  1,277,952 bytes     <- larger than Run 1
+      Run 3  (127.0.0.3):  2,129,920 bytes     <- twice the first
+      Run 4  (127.0.0.4):  1,703,936 bytes
+      Run 5  (127.0.0.5):  1,277,952 bytes
+
+  Run 2 is a fresh process on an address Run 1 never used, yet it gets more room than Run 1
+  did. Run 3 gets roughly double the first. The capacity is not cold and it is not fixed --
+  it drifts, and it drifts as if each run remembered the last. A brand-new process cannot
+  remember anything. So the memory is not in the process.
+
+  --------
+  SO BLAME THE CODE -- EXCEPT STRIPPING THE CODE CHANGES NOTHING
+
+  The obvious suspect is your own program: a thread still alive, a static variable, a loop
+  reusing a handle. So the experiment was rewritten to remove every one of those -- zero
+  threads, zero shared variables, zero loops, a completely flat script that opens one socket,
+  pushes, counts, exits.
+
+  The five numbers came out the same shape. Taking the state out of your program did not take
+  the drift out of the measurement. Whatever remembers, it is not in your code at all.
+
+  --------
+  THEN BLAME YOUR MEMORY -- EXCEPT LOCKING 100 MB OF RAM CHANGES NOTHING
+
+      VirtualAlloc + VirtualLock 100 MB  ->  forced into physical, non-pageable RAM
+      (the kernel can never swap this buffer to disk)
+
+      Run 1  (127.0.0.1):  1,064,960 bytes
+      Run 2  (127.0.0.2):  2,768,896 bytes
+      Run 3  (127.0.0.3):  1,490,944 bytes
+      Run 4  (127.0.0.4):  1,277,952 bytes
+      Run 5  (127.0.0.5):  2,981,888 bytes
+
+  To rule out anything about how user-space memory is laid out, the buffer was pinned: 100 MB
+  locked into real RAM that can never be paged out. If the drift came from your memory, pinning
+  it would freeze the number.
+
+  It did not. The values still wander, and they wander further. The push capacity does not care
+  what your program does with its own memory, because the bytes you send never live in your
+  memory for the part that matters.
+
+  --------
+  LOOK CLOSELY AND EVERY NUMBER IS A WHOLE COUNT OF ONE BLOCK
+
+      212,992 bytes  =  208 x 1024  =  208 KiB   <- one block
+
+      1,064,960 =  5 x 212,992      2,768,896 = 13 x 212,992
+      1,277,952 =  6 x 212,992      1,490,944 =  7 x 212,992
+      2,129,920 = 10 x 212,992      2,981,888 = 14 x 212,992
+      1,703,936 =  8 x 212,992
+
+  The wandering numbers are not random. Divide every single one by 212,992 and the remainder is
+  zero: 5 blocks, 6 blocks, 10 blocks, 13 blocks, 14 blocks. The capacity moves in whole
+  clicks of one 208-KiB block, like a gear lever, never landing between teeth. A quantity that
+  snaps to a fixed block size is being handed out by an allocator, and the only allocator in
+  this picture that deals in fixed blocks is the kernel.
+
+  --------
+  BECAUSE THE BYTES YOU SEND GO INTO THE KERNEL, NOT ONTO THE WIRE
+
+      send(buf)
+         |
+         v
+      tcpip.sys copies buf --> [ NON-PAGED POOL ]  (kernel-owned, never swapped)
+                                     |
+                                     v
+                               drained onto the interface at the kernel's chosen rate
+
+  When you call send, the data does not go to the network. It is copied into a region the
+  kernel owns, the non-paged pool -- kernel memory that can never be swapped to disk -- and the
+  kernel drains it onto the wire on its own schedule. The "push capacity" you measured was never
+  a fact about the network or your buffer. It was the size the kernel decided to open for this
+  route, right now.
+
+  --------
+  AND THE KERNEL SETS THAT SIZE PER ROUTE, NOT PER PROCESS
+
+      127.0.0.1  \
+      127.0.0.2   \
+      127.0.0.3    >--- all inside 127.0.0.0/8 ---> ONE virtual loopback interface
+      127.0.0.4   /
+      127.0.0.5  /
+
+      kernel's cache:   [ loopback interface -> last known good window = big ]
+
+  Here is the escape from the paradox. The kernel keeps a note on how fast each network
+  interface has been going, so the next connection can start where the last one left off instead
+  of crawling up from nothing. It files that note against the route, and every address from
+  127.0.0.1 to 127.0.0.5 sits in the same 127.0.0.0/8 block, so they all ride the one virtual
+  loopback interface.
+
+  Run 1 pushes hard and proves the loopback is fast. The kernel updates its note for the whole
+  interface. Run 2 is a new process on a new address, but it is the same interface, so it is
+  handed Run 1's warmed-up window on arrival. The memory was never in any process. It was in the
+  kernel's per-route cache -- the behaviour written down in RFC 2140, where the send-window and
+  the slow-start threshold are deliberately carried over between connections that share a route.
+
+  --------
+  WHICH ALSO EXPLAINS WHY THE LATER RUNS SHRINK BACK DOWN
+
+  The window does not only grow. In these runs the consuming side sometimes slept about 13
+  seconds before reading -- a slow reader. The kernel watches that: a route whose far end drains
+  slowly is a route it should not keep a big buffer open for, or memory bloats for nothing. So it
+  marks the interface down and shrinks the window, which is why the fourth and fifth numbers fall
+  back below the peak. Same cache, same route, punished instead of rewarded.
+
+  So the drift is not noise. It is one number -- the kernel's opinion of this interface -- being
+  raised by a fast run and lowered by a slow reader, and every fresh process inherits whatever
+  that opinion is at the moment it connects.
+
+  --------
+  SO A BLOCKING SOCKET IS NEVER REALLY YOURS
+
+  Stand back at what just happened. Five isolated programs, and their speed was set by a shared
+  piece of kernel state none of them wrote and none of them could read. If you lean on blocking
+  sends and implicit kernel buffering, your throughput is inherited: it carries the ghost of
+  whatever unrelated process last used this route, up or down.
+
+  The only way out is to stop letting the kernel's hidden schedule drive your thread. A
+  non-blocking socket that reports readiness -- polled with poll, epoll, or IOCP -- hands the
+  timing back to you: you push when there is room and do other work when there is not, instead of
+  blocking on a window the kernel is quietly resizing behind your back. That is the road the rest
+  of these notes take, one failing version at a time.
+
+  --------
+  THE EVIDENCE, IN ONE PLACE (SO YOU CAN REPRODUCE IT)
+
+  To see it yourself: launch five separate processes, one per address 127.0.0.1 through
+  127.0.0.5, each on a non-blocking socket, and for each one count the bytes that are accepted
+  before the first EAGAIN. Do not share anything between them. Make one reading side sleep about
+  13 seconds to play the slow reader.
+
+  Two independent runs of exactly that, copied from the terminal:
+
+      plain 100 MB buffer          buffer pinned with VirtualLock
+      -------------------          ------------------------------
+      1,064,960   ( 5 blocks)      1,064,960   ( 5 blocks)
+      1,277,952   ( 6 blocks)      2,768,896   (13 blocks)
+      2,129,920   (10 blocks)      1,490,944   ( 7 blocks)
+      1,703,936   ( 8 blocks)      1,277,952   ( 6 blocks)
+      1,277,952   ( 6 blocks)      2,981,888   (14 blocks)
+
+  block = 212,992 bytes = 208 KiB. Every measured total is an exact whole number of blocks, in
+  both runs, whether or not the user buffer was pinned -- because the number was always the
+  kernel's per-route window, never your program's memory. The exact block counts vary run to run
+  (the window is a live value the kernel is raising and lowering); what does not vary is that
+  they are always whole blocks, and always inherited across processes that share the route.
+
+  >> STANDARD NAMES
+     push capacity / bytes-before-not-now  -> the socket send buffer the kernel will hold (bounded by cwnd)
+     not-now refusal                       -> EAGAIN on a non-blocking socket
+     the kernel's per-route speed note      -> TCP Control Block Interdependence (RFC 2140): cached cwnd + ssthresh
+     kernel memory that never swaps         -> non-paged pool
+     waiting on readiness instead of blocking -> poll / epoll / IOCP

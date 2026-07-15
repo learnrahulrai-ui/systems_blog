@@ -1,0 +1,17 @@
+@title Not Found :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](index.txt) | [about](about.txt) | [archive](archive.txt) | [glossary](glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  404 -- NO PAGE HERE
+
+  The address you asked for does not resolve to a file. Nothing crashed; the path just points
+  nowhere.
+
+  Try one of these:
+
+    [home](index.txt)        the front page and the reading list
+    [archive](archive.txt)   every post, most recent first
+    [glossary](glossary.txt) plain terms mapped to their textbook names

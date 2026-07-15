@@ -1,0 +1,29 @@
+@title Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](index.txt) | [about](about.txt) | [archive](archive.txt) | [glossary](glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  Plain notes on how systems actually behave when you push them: sockets, epoll, the TCP
+  window, mmap, the kernel's non-paged pool. Each note starts from a program that broke,
+  reproduces the break, and does not stop until the fix is earned. No hand-waving past the
+  hard part, no frameworks, no JavaScript -- just the machine, watched closely.
+
+  Every finding here comes from a real run: the byte counts, the crashes, the error numbers
+  are copied from the terminal, not guessed.
+
+  >> START HERE:
+     [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
+
+
+  POSTS
+  -----
+
+  [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
+    2026-07-15 . special . tcp, kernel, rfc-2140
+    Five fresh processes connect to five different loopback IPs, and the second one starts
+    fast for no reason it can see. The kernel, not the code, set the speed -- it cached the
+    congestion window against the whole subnet route (RFC 2140) and handed the warmed-up
+    metrics to an unrelated process. The real byte counts, the 212,992-byte gears, and why
+    blocking sockets leave you at the mercy of state you never wrote.

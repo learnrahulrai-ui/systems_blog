@@ -1,0 +1,29 @@
+@title About :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](index.txt) | [about](about.txt) | [archive](archive.txt) | [glossary](glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  ABOUT THIS BLOG
+
+  These are notes on systems programming, worked out by hand. Not tutorials that show you the
+  finished, working program -- notes that start from the version that broke, reproduce the
+  break on purpose, and keep going until the fix is earned.
+
+  The method is the same every time:
+
+    a program does something you did not expect
+    -> reproduce it until it happens every run
+    -> find the smallest change that removes it
+    -> name what was really going on, only after you have seen it.
+
+  Every number on this blog is real. The byte counts, the error numbers (EMFILE, EAGAIN), the
+  crash addresses -- they are copied from a terminal after a real run, not estimated. Where a
+  result is measured and varies run to run, it is written with a wavy "about" sign and shown
+  across several runs, not collapsed into one tidy figure.
+
+  No frameworks. No JavaScript. Each page is one plain-text file wrapped in a little HTML so it
+  reads the same in a browser or piped through `less`.
+
+  Written by Rahul Rai. Reach me at learn.rahul.rai@gmail.com.

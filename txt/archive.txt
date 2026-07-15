@@ -1,0 +1,15 @@
+@title Archive :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](index.txt) | [about](about.txt) | [archive](archive.txt) | [glossary](glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  ARCHIVE -- every post, most recent first
+
+
+  SPECIALS
+  --------
+
+  [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
+    2026-07-15 . tcp, kernel, rfc-2140
