@@ -1,0 +1,13 @@
+@title Mistake 2: C++ string comparison logic strcmp == 0 :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: C++ STRING COMPARISON LOGIC STRCMP == 0
+  Mistake 2: C++ string comparison logic strcmp == 0
+  ============================================================================================
+
+
+     Used `if (strcmp(...))` which evaluates to true when the strings DO NOT match (since `strcmp` returns 0 on match). The correct C logic is `if (strcmp(...) == 0)`.

@@ -1,0 +1,13 @@
+@title Mistake 16: TCP TIME_WAIT Port Exhaustion & SO_LINGER The HTTP/1.0 Problem :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: TCP TIME_WAIT PORT EXHAUSTION & SO_LINGER THE HTTP/1.0 PROBLEM
+  Mistake 16: TCP TIME_WAIT Port Exhaustion & SO_LINGER The HTTP/1.0 Problem
+  ============================================================================================
+
+
+  When the server closes a socket, the OS kernel stubbornly hoards the socket in RAM in the `TIME_WAIT` state for 2-4 minutes to catch delayed packets. In the 90s, HTTP/1.0 servers (which closed every connection) would crash after hoarding 65,535 ports. Setting `SO_LINGER` with `l_linger = 0` forces the kernel to send an aggressive `RST` packet, instantly vaporizing the connection from RAM and bypassing `TIME_WAIT` entirely.

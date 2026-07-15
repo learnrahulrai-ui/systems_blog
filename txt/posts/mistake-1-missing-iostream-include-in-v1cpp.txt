@@ -1,0 +1,13 @@
+@title Mistake 1: Missing iostream include in v1.cpp :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: MISSING IOSTREAM INCLUDE IN V1.CPP
+  Mistake 1: Missing iostream include in v1.cpp
+  ============================================================================================
+
+
+     The function `support()` used `std::cout`, but `<iostream>` was not included in the file. Only `<stdio.h>` was included, which caused a compilation error.

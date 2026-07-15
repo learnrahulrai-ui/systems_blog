@@ -1,0 +1,69 @@
+@title Lesson 7: Lesson 7: The Flush-on-Shutdown Bug :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 7: LESSON 7: THE FLUSH-ON-SHUTDOWN BUG
+  Lesson 7: Lesson 7: The Flush-on-Shutdown Bug
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  You implemented **TODO 4**, but you intentionally omitted the check for `!log_queue_.empty()`. You wrote your wait condition like this:
+
+```text
+// Your logic: Only wake up if the server is shutting down.
+cv_.wait(lock, [this]() { return stop_; });
+```
+
+  I created `experiment/todo4_stop_only_bug.cpp` using your exact logic. The Main Thread simulates normal server traffic, pushing logs into the queue and calling `notify_one()` while the server is running.
+
+  --------
+  THE EXECUTION RESULT
+  Here is the exact output of your code:
+```text
+Starting program...
+[Main Thread] User hit endpoint! Logging message: Request 1
+[Main Thread] User hit endpoint! Logging message: Request 2
+[Main Thread] User hit endpoint! Logging message: Request 3
+[Main Thread] Notice how the Background Thread is doing absolutely nothing?
+[Main Thread] The queue is just building up in memory...
+
+[Main Thread] Shutting down server. Setting stop_ = true...
+[Background Thread] Finally writing to disk: Request 1
+[Background Thread] Finally writing to disk: Request 2
+[Background Thread] Finally writing to disk: Request 3
+Program ended successfully.
+```
+
+  --------
+  THE EXPLANATION (WHY YOU FAILED)
+  Your condition variable predicate `return stop_;` essentially tells the Background Thread: *"Never wake up unless the server is literally shutting down."*
+
+  Here is the exact mechanical timeline of your failure:
+  1. **Main Thread**: Pushes "Request 1" into the queue.
+  2. **Main Thread**: Calls `cv_.notify_one()`.
+  3. **Background Thread**: Wakes up! It evaluates the lambda `return stop_;`.
+  4. **Background Thread**: Since `stop_ == false`, it says, *"Nope, condition not met!"* and immediately **goes right back to sleep**. It completely ignores the log message!
+  5. This repeats for hours. The `log_queue_` grows endlessly in memory, consuming gigabytes of RAM. Nothing is ever written to disk.
+
+  Then, when you finally hit CTRL+C and shut down the server:
+  6. **Main Thread**: Sets `stop_ = true` and calls `notify_one()`.
+  7. **Background Thread**: Wakes up, evaluates `return stop_;` (which is now true), and finally starts popping the millions of logs out of the queue all at once!
+
+  --------
+  THE FIX
+  You are building an *Asynchronous Logger*, not a *Shutdown Logger*. The Background Thread must wake up if we are stopping **OR** if there is data to process.
+
+```text
+cv_.wait(lock, [this]() { 
+    return stop_ || !log_queue_.empty(); 
+});
+```
+
+  By adding `|| !log_queue_.empty()`, the thread wakes up the very microsecond a new log enters the queue, writes it to disk, and goes back to sleep.
+

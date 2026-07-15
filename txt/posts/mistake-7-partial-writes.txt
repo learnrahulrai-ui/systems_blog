@@ -1,0 +1,13 @@
+@title Mistake 7: Partial writes :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: PARTIAL WRITES
+  Mistake 7: Partial writes
+  ============================================================================================
+
+
+     `write()` does not guarantee all bytes are written in one go. It returns the number of bytes written. Robust code must loop until `bytes_written == total_len`.

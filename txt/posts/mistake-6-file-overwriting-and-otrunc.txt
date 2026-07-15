@@ -1,0 +1,13 @@
+@title Mistake 6: File overwriting and O_TRUNC :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: FILE OVERWRITING AND O_TRUNC
+  Mistake 6: File overwriting and O_TRUNC
+  ============================================================================================
+
+
+     If you `open` a file for writing without `O_TRUNC` (or `O_APPEND`), it overwrites from the beginning but leaves old garbage at the end if the new string is shorter than the old one.

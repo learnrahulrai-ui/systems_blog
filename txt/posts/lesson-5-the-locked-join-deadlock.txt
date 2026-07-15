@@ -1,0 +1,89 @@
+@title Lesson 5: Lesson 5: The Locked Join Deadlock :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 5: LESSON 5: THE LOCKED JOIN DEADLOCK
+  Lesson 5: Lesson 5: The Locked Join Deadlock
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  You implemented a solution for **TODO 1**, but you left the `join()` call inside the same scope where you locked the mutex:
+
+```text
+~BadLogger() {
+    std::unique_lock<std::mutex> lock(mtx_);
+    stop_ = true;
+    cv_.notify_one();
+    
+    if (background_writer_.joinable()) {
+        background_writer_.join(); // YOU ARE STILL HOLDING THE LOCK!
+    }
+} // Lock drops here
+```
+
+  I wrote an experiment `experiment/todo1_locked_join_bug.cpp` to prove exactly what happens mechanically when you execute this.
+
+  --------
+  THE EXECUTION RESULT
+  When I ran the experiment, the server printed the following lines:
+```text
+Starting program...
+[Background Thread] Started, waiting for work...
+[Main Thread] Ending scope, ~BadLogger will be called.
+[Main Thread] Destructing BadLogger... (Acquiring lock)
+[Main Thread] Setting stop_ = true
+[Main Thread] Calling cv_.notify_one()
+[Main Thread] Calling background_writer_.join() while STILL holding the lock... (DEADLOCK!)
+```
+  And then the program completely froze. It consumed 0% CPU and never aborted. It was a perfect **deadlock**. I had to manually kill the process.
+
+  --------
+  THE EXPLANATION (WHY IT DEADLOCKS)
+  A `std::condition_variable` has a very specific awakening sequence. When the Background Thread is sleeping on `cv_.wait()`, it has internally dropped the mutex.
+
+  When the Main Thread calls `cv_.notify_one()`, the Background Thread wakes up. **However, before `cv_.wait()` is allowed to return, it MUST re-acquire the mutex.**
+
+  Because your code kept the `join()` inside the scope of the `std::unique_lock`, we get a Mexican standoff:
+  1. The **Background Thread** is stuck on line 69 trying to acquire `mtx_` so it can finish waking up.
+  2. The **Main Thread** is holding `mtx_` and is stuck on line 27 in `join()`, waiting for the Background Thread to finish.
+
+  They wait on each other forever.
+
+  --------
+  WHICH FUNCTIONS FREEZE?
+  If we look at this mechanically at the function level, there are exactly two functions that freeze halfway through and never return:
+
+  1. **`std::thread::join()`** (called inside `~Logger()`)
+     The Main Thread enters this function and never returns. It is permanently asleep inside `join()`, waiting for the Background Thread to exit.
+
+  2. **`std::condition_variable::wait()`** (called inside `processQueue()`)
+     The Background Thread enters this function to go to sleep. When the Main Thread notifies it, it tries to wake up and return from the function. But because it cannot grab the lock, it gets stuck inside the internal locking mechanism of `wait()`. It never returns from `wait()`.
+
+  - Because `wait()` never finishes, `processQueue()` never finishes.
+  - Because `processQueue()` never finishes, `join()` never finishes.
+  - Because `join()` never finishes, `~Logger()` never finishes.
+
+  --------
+  THE FIX
+  Always drop your locks before yielding or waiting on other threads!
+```text
+~BadLogger() {
+    {
+        std::unique_lock<std::mutex> lock(mtx_);
+        stop_ = true;
+    } // Lock drops here!
+    
+    cv_.notify_one();
+    if (background_writer_.joinable()) {
+        background_writer_.join();
+    }
+}
+```
+  Now, when the Background Thread wakes up, the lock is free. It successfully re-acquires the lock, reads `stop_ == true`, breaks the loop, and gracefully terminates, allowing `join()` to succeed.
+

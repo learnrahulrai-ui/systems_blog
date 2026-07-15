@@ -13,3 +13,138 @@
 
   [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
     2026-07-15 . tcp, kernel, rfc-2140
+
+  [Lesson 1: Lesson 1: The Physical Reality of C++ Lambdas](posts/lesson-1-the-physical-reality-of-c-lambdas.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 2: Lesson 2: Threads, Queues, and std::function](posts/lesson-2-threads-queues-and-stdfunction.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 3: Lesson 3: The Full Execution Chain (End-to-End)](posts/lesson-3-the-full-execution-chain-end-to-end.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 4: Lesson 4: The Fatal Thread Destruction Bug](posts/lesson-4-the-fatal-thread-destruction-bug.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 5: Lesson 5: The Locked Join Deadlock](posts/lesson-5-the-locked-join-deadlock.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 6: Lesson 6: The Spurious Wakeup Crash](posts/lesson-6-the-spurious-wakeup-crash.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 7: Lesson 7: The Flush-on-Shutdown Bug](posts/lesson-7-the-flush-on-shutdown-bug.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug)](posts/lesson-8-total-data-loss-the-power-outage-bug.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 9: Lesson 9: The Missing Break Clause Crash](posts/lesson-9-the-missing-break-clause-crash.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 10: Lesson 10: The Real-Time Background Worker Proof](posts/lesson-10-the-real-time-background-worker-proof.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 11: Lesson 11: The Truncated Shutdown Bug](posts/lesson-11-the-truncated-shutdown-bug.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 12: Lesson 12: The Permutation Matrix](posts/lesson-12-the-permutation-matrix.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 13: Lesson 13: Case 1 - The Shutdown Deadlock](posts/lesson-13-case-1---the-shutdown-deadlock.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 14: Lesson 14: Case 2 - The Boolean Inversion Bug](posts/lesson-14-case-2---the-boolean-inversion-bug.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 15: Lesson 15: The Debugger Falls on His Sword (Case 3)](posts/lesson-15-the-debugger-falls-on-his-sword-case-3.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 16: Lesson 16: Tracing Case 4 (The Truncated Shutdown)](posts/lesson-16-tracing-case-4-the-truncated-shutdown.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 17: Lesson 17: The Ultimate 80-Test Matrix](posts/lesson-17-the-ultimate-80-test-matrix.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 18: Lesson 18: The Eternal Server](posts/lesson-18-the-eternal-server.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof](posts/lesson-19-the-out-of-memory-oom-proof.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 20: Lesson 20: The Immortal Logger](posts/lesson-20-the-immortal-logger.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 21: Lesson 21: Incident 006 — "Marketing Broke Our Server"](posts/lesson-21-incident-006-marketing-broke-our-server.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It](posts/lesson-22-one-request-one-stop-the-while-loop-proves-it.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count](posts/lesson-23-three-requests-one-stop-the-iteration-count.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 24: Lesson 24: Stop Before Any Log — The Zero Case](posts/lesson-24-stop-before-any-log-the-zero-case.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 25: Lesson 25: The Periodic Flush — Three Return Paths](posts/lesson-25-the-periodic-flush-three-return-paths.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 26: Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes](posts/lesson-26-the-contract-why-wait-and-waitfor-are-not-substitutes.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Lesson 27: Lesson 27 — AssignmentSystem: Industry & Academic Validation](posts/lesson-27-assignmentsystem-industry-academic-validation.txt)
+    2026-07-15 . concurrency, threads, cpp
+
+  [Mistake 1: Missing iostream include in v1.cpp](posts/mistake-1-missing-iostream-include-in-v1cpp.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 2: C++ string comparison logic strcmp == 0](posts/mistake-2-c-string-comparison-logic-strcmp-0.txt)
+    2026-07-15 . ipc, network, debugging
+
+  [Mistake 3: Missing include and syntax errors](posts/mistake-3-missing-include-and-syntax-errors.txt)
+    2026-07-15 . ipc, network, debugging
+
+  [Mistake 4: strcpy vs strncpy signature](posts/mistake-4-strcpy-vs-strncpy-signature.txt)
+    2026-07-15 . ipc, network, debugging
+
+  [Mistake 5: open system call parameters](posts/mistake-5-open-system-call-parameters.txt)
+    2026-07-15 . ipc, file-io, system-calls
+
+  [Mistake 6: File overwriting and O_TRUNC](posts/mistake-6-file-overwriting-and-otrunc.txt)
+    2026-07-15 . ipc, file-io, system-calls
+
+  [Mistake 7: Partial writes](posts/mistake-7-partial-writes.txt)
+    2026-07-15 . ipc, file-io, system-calls
+
+  [Mistake 8: File existence for reading](posts/mistake-8-file-existence-for-reading.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 9: Buffer overflow on string termination](posts/mistake-9-buffer-overflow-on-string-termination.txt)
+    2026-07-15 . ipc, network, debugging
+
+  [Mistake 10: Polling vs Blocking](posts/mistake-10-polling-vs-blocking.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 11: The TIME_WAIT / EADDRINUSE bind bug](posts/mistake-11-the-timewait-eaddrinuse-bind-bug.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 12: The Ghost Connection ECONNABORTED accept bug](posts/mistake-12-the-ghost-connection-econnaborted-accept-bug.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 13: Silent program crash from unchecked accept return](posts/mistake-13-silent-program-crash-from-unchecked-accept-return.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 14: Blocking vs Non-Blocking accept Behavior](posts/mistake-14-blocking-vs-non-blocking-accept-behavior.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 15: File Descriptor Leak EMFILE](posts/mistake-15-file-descriptor-leak-emfile.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 16: TCP TIME_WAIT Port Exhaustion & SO_LINGER The HTTP/1.0 Problem](posts/mistake-16-tcp-timewait-port-exhaustion-solinger-the-http10-problem.txt)
+    2026-07-15 . network, socket, ipc
+
+  [Mistake 17: Partial Reads and Kernel Buffers The 212KB Wall](posts/mistake-17-partial-reads-and-kernel-buffers-the-212kb-wall.txt)
+    2026-07-15 . ipc, network, debugging
+
+  [Mistake 18: The Illusion of write Return Values Data in Flight](posts/mistake-18-the-illusion-of-write-return-values-data-in-flight.txt)
+    2026-07-15 . network, socket, ipc

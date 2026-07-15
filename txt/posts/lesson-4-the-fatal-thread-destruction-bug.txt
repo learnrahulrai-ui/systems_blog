@@ -1,0 +1,77 @@
+@title Lesson 4: Lesson 4: The Fatal Thread Destruction Bug :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 4: LESSON 4: THE FATAL THREAD DESTRUCTION BUG
+  Lesson 4: Lesson 4: The Fatal Thread Destruction Bug
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  We are using **Bug-Driven Development**. I wrote a standalone experiment `experiment/todo1_shutdown_bug.cpp` that mimics the exact behavior of our `Logger` if you completely ignore **TODO 1** in the destructor.
+
+  Here is the exact code I executed:
+```text
+class BadLogger {
+public:
+    BadLogger() {
+        // We start the background thread
+        background_writer_ = std::thread(&BadLogger::processQueue, this);
+    }
+
+    ~BadLogger() {
+        // INTENTIONALLY MISSING TODO 1!
+        // We do not set stop_ = true.
+        // We do not notify the cv.
+        // We do not join the thread.
+        std::cout << "Destructing BadLogger...\n";
+    }
+
+private:
+    std::thread background_writer_;
+    // ...
+};
+
+int main() {
+    std::cout << "Starting program...\n";
+    {
+        BadLogger logger;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    } // ~BadLogger is called right here!
+    std::cout << "Program ended successfully (You will never see this line).\n";
+    return 0;
+}
+```
+
+  --------
+  THE EXECUTION RESULT
+  When I compiled and ran `todo1_shutdown_bug.exe`, the process instantly crashed with a fatal **Exit Code 1** and spawned a Windows C++ Runtime Error dialog box stating:
+  `abort() has been called`
+
+  The final `std::cout` line in `main()` never executed. The server violently died.
+
+  --------
+  THE EXPLANATION (WHY TODO 1 IS MANDATORY)
+  When the `BadLogger` object goes out of scope, C++ begins destroying its member variables.
+  One of those member variables is `std::thread background_writer_`.
+
+  The C++ standard committee made a very specific, aggressive rule regarding threads:
+  **"If a `std::thread` object is destroyed while it is still running (joinable), the program must immediately call `std::terminate()` and abort."**
+
+  Because the background thread was still inside the infinite `while(true)` loop (sleeping on `cv_.wait`), it was still running. When the destructor finished, the `std::thread` object was destroyed, triggering an immediate, unrecoverable crash.
+
+  --------
+  THE FIX (TODO 1)
+  To safely destroy a class that owns a thread, you must ensure the thread gracefully exits its function *before* the `std::thread` object is destroyed.
+
+  1. **Signal**: You must set a flag (like `stop_ = true`) so the loop knows it's time to quit.
+  2. **Wake up**: If the thread is sleeping on a condition variable, you must call `cv.notify_one()` so it wakes up, checks the flag, and breaks out of the loop.
+  3. **Join**: You must call `background_writer_.join()`. This physically pauses the destructor until the background thread completely finishes its execution and gracefully returns from `processQueue()`.
+
+  By doing these three things, the `std::thread` object is no longer "running" when it gets destroyed, and the C++ runtime allows your program to exit safely.
+

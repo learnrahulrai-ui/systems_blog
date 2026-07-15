@@ -1,0 +1,13 @@
+@title Mistake 3: Missing include and syntax errors :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: MISSING INCLUDE AND SYNTAX ERRORS
+  Mistake 3: Missing include and syntax errors
+  ============================================================================================
+
+
+     Forgot to `#include <cstring>` for `strcmp`. Also missed the closing parenthesis `)` for the `if` conditions and a semicolon `;` after a function call.

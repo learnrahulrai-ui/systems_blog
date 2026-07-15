@@ -1,0 +1,67 @@
+@title Lesson 10: Lesson 10: The Real-Time Background Worker Proof :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 10: LESSON 10: THE REAL-TIME BACKGROUND WORKER PROOF
+  Lesson 10: Lesson 10: The Real-Time Background Worker Proof
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  You hypothesized that `Logger::processQueue()` only did work when `Logger::~Logger()` (the destructor) was called.
+
+  To disprove this, I built `experiment/todo4_realtime_proof.cpp` using the fully fixed, perfect Logger design:
+```text
+cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+```
+
+  In `main()`, I did the following:
+  1. Initialize the Logger.
+  2. Push "Log 1".
+  3. **Sleep for 1 full second** (simulating the server running and doing other things).
+  4. Push "Log 2".
+  5. **Sleep for 1 full second**.
+  6. Finally, let the server shut down (calling the destructor).
+
+  --------
+  THE EXECUTION RESULT
+  Here is the exact output of the program. Look at how the execution interleaves!
+
+```text
+[main] Program started.
+
+[Main Thread] Constructor called! Spawning Background Thread...
+[Background Thread] processQueue() started! Entering while(true) loop...
+
+[Main Thread] Pushing to queue: Log 1: User Logged In
+[main] Sleeping for 1 full second. Watch the background thread work while I sleep!
+[Background Thread] ---> DOING REAL WORK: Wrote 'Log 1: User Logged In' to disk!
+
+[Main Thread] Pushing to queue: Log 2: User Clicked Button
+[main] Sleeping for another 1 second...
+[Background Thread] ---> DOING REAL WORK: Wrote 'Log 2: User Clicked Button' to disk!
+
+[main] Ending scope. Destructor will NOW be called.
+[Main Thread] Destructor called! Setting stop_ = true...
+[Background Thread] Queue is empty and stop_ is true. Breaking out of loop!
+[Background Thread] processQueue() function has officially ended.
+[Main Thread] Destructor finished.
+[main] Program ended successfully.
+```
+
+  --------
+  THE EXPLANATION
+  Notice what happened when `main()` pushed "Log 1" and went to sleep for a full second.
+  While `main()` was completely asleep, `Logger::processQueue()` woke up, pulled the log, and wrote it to disk!
+
+  It did this **long before** the destructor was ever called.
+
+  The `std::thread` spawned by the constructor runs entirely in parallel with `main()`. Because we fixed the `cv_.wait()` predicate to check the queue, it wakes up the exact millisecond a log is pushed, processes it, and goes right back to sleep, keeping the RAM empty and the logs safely on the hard drive.
+
+  The destructor is truly just a polite knock on the door at the very end of the server's life saying: *"We are shutting down now, you can go home."*
+

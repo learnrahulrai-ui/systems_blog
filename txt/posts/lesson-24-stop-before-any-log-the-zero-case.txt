@@ -1,0 +1,75 @@
+@title Lesson 24: Lesson 24: Stop Before Any Log — The Zero Case :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 24: LESSON 24: STOP BEFORE ANY LOG — THE ZERO CASE
+  Lesson 24: Lesson 24: Stop Before Any Log — The Zero Case
+  ============================================================================================
+
+
+
+  --------
+  THE SCENARIO
+
+  Server starts. Someone presses stop **before any request arrives**.
+
+  No log calls. No queue items. No pending buffer. Just a clean shutdown.
+
+  --------
+  THE QUESTION
+
+  Will the while loop crash or behave correctly when there's nothing to do?
+
+  --------
+  THE EXPERIMENT
+
+  File: `experiment/test_stop_no_log.cpp`
+
+  --------
+  TRACE
+
+```text
+[main] Server started. No requests yet.
+[main] Someone presses stop immediately!
+
+[~Logger] stop_=true, notify_one
+
+[processQueue] Iteration 1 — stop_=1 queue_size=0 pending_size=0
+[processQueue] stop && empty → nothing to flush (correct!)
+[flushPending] Nothing to flush (correct!)
+[processQueue] Exited loop after 1 iterations
+
+[flushPending] Nothing to flush (correct!)
+[~Logger] Shutdown done
+```
+
+  --------
+  THE WHILE LOOP ITERATION COUNT
+
+  | N (requests) | Iterations | Formula |
+  |-------------|-----------|---------|
+  | 0 | 1 | N + 1 = 1 |
+  | 1 | 2 | N + 1 = 2 |
+  | 3 | 4 | N + 1 = 4 |
+
+  **General rule:** `iterations = requests + 1`
+
+  The "+1" is always the final iteration where `stop_ && empty` is detected and the pending buffer is flushed (or skipped if empty).
+
+  --------
+  WHY 1 ITERATION FOR 0 REQUESTS
+
+```text
+cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+```
+
+  When `stop_=true` is set and queue is empty, the predicate `stop_` is **true**. The wait returns immediately. The check `if (stop_ && log_queue_.empty())` fires, `flushPending()` does nothing (nothing to flush), and `break` exits.
+
+  --------
+  THE LESSON
+
+  The code handles zero requests cleanly. No special case needed. The same `if (stop_ && empty())` guard that protects the shutdown path also handles the "nothing happened" case.
+

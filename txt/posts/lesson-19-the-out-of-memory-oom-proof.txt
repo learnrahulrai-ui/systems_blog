@@ -1,0 +1,46 @@
+@title Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 19: LESSON 19: THE OUT-OF-MEMORY (OOM) PROOF
+  Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof
+  ============================================================================================
+
+
+
+  You asked for physical C++ proof with no gossip.
+
+  I wrote `experiment/todo4_missing_consumer_oom_bug.cpp`.
+  In this experiment, I removed `!log_queue_.empty()` from the lambda, leaving only `[this](){ return stop_; }`.
+
+  Then, I built an "Eternal Server". It boots up, accepts 1,000,000 user requests, and never shuts down.
+
+  --------
+  THE EXECUTION OUTPUT
+  Here is the exact output straight from the compiler and executable:
+
+```text
+[main] Starting Eternal Server...
+[main] Simulating 1,000,000 user requests...
+[main] Finished pushing requests.
+[main] Sleeping for 2 full seconds to give the background thread plenty of time to write...
+
+=========================================
+RUNTIME SNAPSHOT:
+Logs Written to Disk: 0
+Logs Trapped in RAM:  1000000
+=========================================
+
+BUG CONFIRMED: Missing Consumer! Thread never woke up. OOM imminent.
+```
+
+  --------
+  THE CONCLUSION
+  Despite having 2 full seconds of idle CPU time, the Background Thread wrote exactly **0** logs to the disk.
+
+  Because `stop_` was false, the thread never woke up.
+  1,000,000 strings were permanently trapped in RAM. In a production environment, this server crashes from an Out-Of-Memory exception within hours.
+

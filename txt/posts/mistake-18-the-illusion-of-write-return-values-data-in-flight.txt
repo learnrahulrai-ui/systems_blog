@@ -1,0 +1,13 @@
+@title Mistake 18: The Illusion of write Return Values Data in Flight :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: THE ILLUSION OF WRITE RETURN VALUES DATA IN FLIGHT
+  Mistake 18: The Illusion of write Return Values Data in Flight
+  ============================================================================================
+
+
+  When `write(100MB)` returns `638,976`, it DOES NOT mean the consumer received that data. It only means the local OS Kernel *accepted* 638KB into its Send Buffer. If the consumer suddenly aborts (RST), that data is permanently lost mid-flight, even though `write()` reported it as "written".

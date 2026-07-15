@@ -1,0 +1,13 @@
+@title Mistake 9: Buffer overflow on string termination :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: BUFFER OVERFLOW ON STRING TERMINATION
+  Mistake 9: Buffer overflow on string termination
+  ============================================================================================
+
+
+     If you `read` exactly the size of your buffer (e.g., 256 bytes into a 256-byte array), writing `buffer[256] = '\0'` accesses out-of-bounds memory. Always read `sizeof(buffer) - 1`.

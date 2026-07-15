@@ -1,0 +1,13 @@
+@title Mistake 13: Silent program crash from unchecked accept return :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: SILENT PROGRAM CRASH FROM UNCHECKED ACCEPT RETURN
+  Mistake 13: Silent program crash from unchecked accept return
+  ============================================================================================
+
+
+      `accept()` can fail and return `-1` (due to non-blocking empty queues, or aborted connections). If you don't check `if (client_fd == -1)`, your C++ program will blindly run `write(-1, ...)`, which causes the OS to silently fail the write and kill your server process gracefully but unexpectedly without printing any error! Always check system call return values!

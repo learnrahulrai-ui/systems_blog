@@ -27,3 +27,183 @@
     congestion window against the whole subnet route (RFC 2140) and handed the warmed-up
     metrics to an unrelated process. The real byte counts, the 212,992-byte gears, and why
     blocking sockets leave you at the mercy of state you never wrote.
+
+  [Lesson 1: Lesson 1: The Physical Reality of C++ Lambdas](posts/lesson-1-the-physical-reality-of-c-lambdas.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    C++ lambdas appear to be magic "inline functions," but structurally, they are nothing more than standard C++ classes generated silently by the compiler.
+
+  [Lesson 2: Lesson 2: Threads, Queues, and std::function](posts/lesson-2-threads-queues-and-stdfunction.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    If lambdas are just custom classes, how do standard library components like `std::thread` and `std::queue` store and execute them? -------- STD::THREAD EATS RAW OBJECTS When you create a worker thread with a lambda: `std::thread` is a template.
+
+  [Lesson 3: Lesson 3: The Full Execution Chain (End-to-End)](posts/lesson-3-the-full-execution-chain-end-to-end.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    We can now map the complete journey of a single integer (the `client_socket`) from the moment the OS accepts the connection, across the thread boundary, and into the `handleClient` function.
+
+  [Lesson 4: Lesson 4: The Fatal Thread Destruction Bug](posts/lesson-4-the-fatal-thread-destruction-bug.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We are using **Bug-Driven Development**. I wrote a standalone experiment `experiment/todo1_shutdown_bug.cpp` that mimics the exact behavior of our `Logger` if you completely ignore **TODO 1** in the destructor.
+
+  [Lesson 5: Lesson 5: The Locked Join Deadlock](posts/lesson-5-the-locked-join-deadlock.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP You implemented a solution for **TODO 1**, but you left the `join()` call inside the same scope where you locked the mutex: I wrote an experiment `experiment/todo1_locked_join_bug.cpp` to prove exactly what happens mechanically ...
+
+  [Lesson 6: Lesson 6: The Spurious Wakeup Crash](posts/lesson-6-the-spurious-wakeup-crash.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP A "Spurious Wakeup" is a well-known hardware/OS anomaly where a thread sleeping on a condition variable suddenly wakes up for absolutely no reason, even if `notify_one()` was never called.
+
+  [Lesson 7: Lesson 7: The Flush-on-Shutdown Bug](posts/lesson-7-the-flush-on-shutdown-bug.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP You implemented **TODO 4**, but you intentionally omitted the check for `!log_queue_.empty()`. You wrote your wait condition like this: I created `experiment/todo4_stop_only_bug.cpp` using your exact logic.
+
+  [Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug)](posts/lesson-8-total-data-loss-the-power-outage-bug.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP Because your lambda only allowed `Logger::processQueue()` to wake up when `stop_` became true, your server was running a "Flush-on-Shutdown" strategy.
+
+  [Lesson 9: Lesson 9: The Missing Break Clause Crash](posts/lesson-9-the-missing-break-clause-crash.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP You correctly set up the condition variable to wake up on logs or shutdown: But you asked: *"What if I remove the `if (stop_ && log_queue_.empty()) break;` line?"* I built `experiment/todo4_missing_break_bug.cpp` to simulate exa...
+
+  [Lesson 10: Lesson 10: The Real-Time Background Worker Proof](posts/lesson-10-the-real-time-background-worker-proof.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP You hypothesized that `Logger::processQueue()` only did work when `Logger::~Logger()` (the destructor) was called. To disprove this, I built `experiment/todo4_realtime_proof.cpp` using the fully fixed, perfect Logger design: In ...
+
+  [Lesson 11: Lesson 11: The Truncated Shutdown Bug](posts/lesson-11-the-truncated-shutdown-bug.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP You asked what happens if we remove `&& log_queue_.empty()` from the loop termination check: I created `experiment/todo4_truncated_shutdown_bug.cpp` to simulate this.
+
+  [Lesson 12: Lesson 12: The Permutation Matrix](posts/lesson-12-the-permutation-matrix.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    The Asynchronous Logger relies on exactly 4 variables spread across two lines of code to function correctly: If you remove **any single variable** from these two lines, the server will suffer a catastrophic failure.
+
+  [Lesson 13: Lesson 13: Case 1 - The Shutdown Deadlock](posts/lesson-13-case-1---the-shutdown-deadlock.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We removed `stop_` from the condition variable lambda, leaving only the queue check: -------- YOUR BRAIN DUMP (THE NORMAL RUNTIME) Your mental trace of the normal execution was **100% flawless**: 1.
+
+  [Lesson 14: Lesson 14: Case 2 - The Boolean Inversion Bug](posts/lesson-14-case-2---the-boolean-inversion-bug.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We removed the queue check from the lambda, leaving only the shutdown check: -------- YOUR BRAIN DUMP You asked two critical questions and made one massive error in logic.
+
+  [Lesson 15: Lesson 15: The Debugger Falls on His Sword (Case 3)](posts/lesson-15-the-debugger-falls-on-his-sword-case-3.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We removed `stop_` from the `if` statement: -------- YOUR BRAIN DUMP You traced the normal runtime for a single log: 1. `log("msg")` pushes 1 item and notifies.
+
+  [Lesson 16: Lesson 16: Tracing Case 4 (The Truncated Shutdown)](posts/lesson-16-tracing-case-4-the-truncated-shutdown.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We are analyzing Case 4. You removed the queue check from the `if` statement: Let's trace your 4 scenarios line by line to see exactly when this logic fails.
+
+  [Lesson 17: Lesson 17: The Ultimate 80-Test Matrix](posts/lesson-17-the-ultimate-80-test-matrix.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    I built a C++ test framework that compiled all 8 logic permutations and executed 10 edge-case test cases against each version, capturing the exact point of failure using a timeout supervisor.
+
+  [Lesson 18: Lesson 18: The Eternal Server](posts/lesson-18-the-eternal-server.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    You asked a brilliant question: *"Servers do not shut down. What happens if we ignore shutdown entirely and just look at the bugs that happen while the server runs indefinitely?"* Let's do the math.
+
+  [Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof](posts/lesson-19-the-out-of-memory-oom-proof.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    You asked for physical C++ proof with no gossip. I wrote `experiment/todo4_missing_consumer_oom_bug.cpp`. In this experiment, I removed `!log_queue_.empty()` from the lambda, leaving only `[this](){ return stop_; }`.
+
+  [Lesson 20: Lesson 20: The Immortal Logger](posts/lesson-20-the-immortal-logger.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    You theorized that if a program never shuts down (or if you simply do not care about data loss when the laptop crashes), you do not need `stop_` or a `break` clause at all.
+
+  [Lesson 21: Lesson 21: Incident 006 — "Marketing Broke Our Server"](posts/lesson-21-incident-006-marketing-broke-our-server.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    We are officially graduating from **Correctness Bugs** (deadlocks, race conditions, segfaults) to **Performance Bottlenecks**. -------- THE SCENARIO Yesterday, our endpoint was fast and everyone was happy: Today, Marketing requested "richer data".
+
+  [Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It](posts/lesson-22-one-request-one-stop-the-while-loop-proves-it.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP -------- THE SCENARIO **Exactly one request arrives.** Then someone hits cancel/shutdown. No more requests. -------- STEP-BY-STEP **1st second — request arrives:** **Shutdown signal arrives:** **Key insight:** The while loop ite...
+
+  [Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count](posts/lesson-23-three-requests-one-stop-the-iteration-count.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE PATTERN For **N requests + 1 stop**, the while loop runs **N + 1** iterations: - **N iterations**: pop each message and add to `pending_` - **1 final iteration**: detect `stop_ && empty` → `flushPending()` → `break` -------- THE EXPER...
+
+  [Lesson 24: Lesson 24: Stop Before Any Log — The Zero Case](posts/lesson-24-stop-before-any-log-the-zero-case.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SCENARIO Server starts. Someone presses stop **before any request arrives**. No log calls. No queue items. No pending buffer. Just a clean shutdown.
+
+  [Lesson 25: Lesson 25: The Periodic Flush — Three Return Paths](posts/lesson-25-the-periodic-flush-three-return-paths.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE PROBLEM Without a timeout, partial `pending_` data sits in RAM until the destructor runs: -------- NAIVE FIX: JUST ADD WAIT_FOR -------- THE THREE RETURN PATHS `cv_.wait(lock, pred)` has **2** return paths: | # | Why it returns | pred...
+
+  [Lesson 26: Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes](posts/lesson-26-the-contract-why-wait-and-waitfor-are-not-substitutes.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- THE SETUP We had a working logger. The consumer loop used: We wanted to add a periodic flush every 5 seconds. The obvious change: -------- THE CRASH After 5 seconds of idle, the program crashed on `front()` of an empty queue.
+
+  [Lesson 27: Lesson 27 — AssignmentSystem: Industry & Academic Validation](posts/lesson-27-assignmentsystem-industry-academic-validation.txt)
+    2026-07-15 . special . concurrency, threads, cpp
+    -------- WHAT WE BUILT A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`. -------- THE 5 FUNCTIONS | Function | What It Does | Lines | |---|---|---| | `assign(conversation_id)` | Finds the age...
+
+  [Mistake 1: Missing iostream include in v1.cpp](posts/mistake-1-missing-iostream-include-in-v1cpp.txt)
+    2026-07-15 . special . network, socket, ipc
+    The function `support()` used `std::cout`, but `<iostream>` was not included in the file. Only `<stdio.h>` was included, which caused a compilation error.
+
+  [Mistake 2: C++ string comparison logic strcmp == 0](posts/mistake-2-c-string-comparison-logic-strcmp-0.txt)
+    2026-07-15 . special . ipc, network, debugging
+    Used `if (strcmp(...))` which evaluates to true when the strings DO NOT match (since `strcmp` returns 0 on match). The correct C logic is `if (strcmp(...) == 0)`.
+
+  [Mistake 3: Missing include and syntax errors](posts/mistake-3-missing-include-and-syntax-errors.txt)
+    2026-07-15 . special . ipc, network, debugging
+    Forgot to `#include <cstring>` for `strcmp`. Also missed the closing parenthesis `)` for the `if` conditions and a semicolon `;` after a function call.
+
+  [Mistake 4: strcpy vs strncpy signature](posts/mistake-4-strcpy-vs-strncpy-signature.txt)
+    2026-07-15 . special . ipc, network, debugging
+    Tried to pass 3 arguments (dest, src, len) to `strcpy`. This is the signature for `strncpy`. `strcpy` only takes 2 arguments (dest, src).
+
+  [Mistake 5: open system call parameters](posts/mistake-5-open-system-call-parameters.txt)
+    2026-07-15 . special . ipc, file-io, system-calls
+    Forgot the mode flags for `open()`. Passing only a filename implicitly tries to read. Writing requires `O_WRONLY | O_CREAT`, and when using `O_CREAT` you must pass the permissions (e.g., `0644`).
+
+  [Mistake 6: File overwriting and O_TRUNC](posts/mistake-6-file-overwriting-and-otrunc.txt)
+    2026-07-15 . special . ipc, file-io, system-calls
+    If you `open` a file for writing without `O_TRUNC` (or `O_APPEND`), it overwrites from the beginning but leaves old garbage at the end if the new string is shorter than the old one.
+
+  [Mistake 7: Partial writes](posts/mistake-7-partial-writes.txt)
+    2026-07-15 . special . ipc, file-io, system-calls
+    `write()` does not guarantee all bytes are written in one go. It returns the number of bytes written. Robust code must loop until `bytes_written == total_len`.
+
+  [Mistake 8: File existence for reading](posts/mistake-8-file-existence-for-reading.txt)
+    2026-07-15 . special . network, socket, ipc
+    `open(O_RDONLY)` will fail (return -1) if the file doesn't exist yet. The consumer must handle this if it starts before the support process.
+
+  [Mistake 9: Buffer overflow on string termination](posts/mistake-9-buffer-overflow-on-string-termination.txt)
+    2026-07-15 . special . ipc, network, debugging
+    If you `read` exactly the size of your buffer (e.g., 256 bytes into a 256-byte array), writing `buffer[256] = '\0'` accesses out-of-bounds memory. Always read `sizeof(buffer) - 1`.
+
+  [Mistake 10: Polling vs Blocking](posts/mistake-10-polling-vs-blocking.txt)
+    2026-07-15 . special . network, socket, ipc
+    Using a standard file for real-time IPC requires the consumer to spin in an infinite loop (`while(true) read()`), which burns 100% CPU (polling). Real IPC needs blocking primitives (like sockets or pipes) that put the thread to sleep until data ar...
+
+  [Mistake 11: The TIME_WAIT / EADDRINUSE bind bug](posts/mistake-11-the-timewait-eaddrinuse-bind-bug.txt)
+    2026-07-15 . special . network, socket, ipc
+    If a server closes a connection and exits, the OS holds the port in a TIME_WAIT state to catch delayed packets. Restarting the server instantly throws "Address already in use".
+
+  [Mistake 12: The Ghost Connection ECONNABORTED accept bug](posts/mistake-12-the-ghost-connection-econnaborted-accept-bug.txt)
+    2026-07-15 . special . network, socket, ipc
+    The OS completes the TCP handshake *before* your code calls `accept()`. If a client connects and then instantly sends a kill signal (Ctrl+C) before `accept()` runs, the connection dies in the queue.
+
+  [Mistake 13: Silent program crash from unchecked accept return](posts/mistake-13-silent-program-crash-from-unchecked-accept-return.txt)
+    2026-07-15 . special . network, socket, ipc
+    `accept()` can fail and return `-1` (due to non-blocking empty queues, or aborted connections). If you don't check `if (client_fd == -1)`, your C++ program will blindly run `write(-1, ...)`, which causes the OS to silently fail the write and kill ...
+
+  [Mistake 14: Blocking vs Non-Blocking accept Behavior](posts/mistake-14-blocking-vs-non-blocking-accept-behavior.txt)
+    2026-07-15 . special . network, socket, ipc
+    - **Blocking (No `fcntl`)**: `accept()` waits FOREVER for a client. The only way it stops is if a client connects, or you manually kill the server with `Ctrl+C`.
+
+  [Mistake 15: File Descriptor Leak EMFILE](posts/mistake-15-file-descriptor-leak-emfile.txt)
+    2026-07-15 . special . network, socket, ipc
+    Forgetting to `close()` the socket after handling a client permanently leaks the file descriptor integer (e.g., 4, 5, 6...). The process eventually hits the OS limit and `accept()` fails with `EMFILE`.
+
+  [Mistake 16: TCP TIME_WAIT Port Exhaustion & SO_LINGER The HTTP/1.0 Problem](posts/mistake-16-tcp-timewait-port-exhaustion-solinger-the-http10-problem.txt)
+    2026-07-15 . special . network, socket, ipc
+    When the server closes a socket, the OS kernel stubbornly hoards the socket in RAM in the `TIME_WAIT` state for 2-4 minutes to catch delayed packets. In the 90s, HTTP/1.0 servers (which closed every connection) would crash after hoarding 65,535 po...
+
+  [Mistake 17: Partial Reads and Kernel Buffers The 212KB Wall](posts/mistake-17-partial-reads-and-kernel-buffers-the-212kb-wall.txt)
+    2026-07-15 . special . ipc, network, debugging
+    The OS does not wait for a full `read()` request to arrive. If you request 3MB, the OS simply returns whatever is currently in the Kernel Receive Buffer (max ~212KB on Windows) and instantly returns control to you.
+
+  [Mistake 18: The Illusion of write Return Values Data in Flight](posts/mistake-18-the-illusion-of-write-return-values-data-in-flight.txt)
+    2026-07-15 . special . network, socket, ipc
+    When `write(100MB)` returns `638,976`, it DOES NOT mean the consumer received that data. It only means the local OS Kernel *accepted* 638KB into its Send Buffer.

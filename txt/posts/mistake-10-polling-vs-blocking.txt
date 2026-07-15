@@ -1,0 +1,13 @@
+@title Mistake 10: Polling vs Blocking :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: POLLING VS BLOCKING
+  Mistake 10: Polling vs Blocking
+  ============================================================================================
+
+
+      Using a standard file for real-time IPC requires the consumer to spin in an infinite loop (`while(true) read()`), which burns 100% CPU (polling). Real IPC needs blocking primitives (like sockets or pipes) that put the thread to sleep until data arrives.

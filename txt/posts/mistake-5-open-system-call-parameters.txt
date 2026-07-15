@@ -1,0 +1,13 @@
+@title Mistake 5: open system call parameters :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: OPEN SYSTEM CALL PARAMETERS
+  Mistake 5: open system call parameters
+  ============================================================================================
+
+
+     Forgot the mode flags for `open()`. Passing only a filename implicitly tries to read. Writing requires `O_WRONLY | O_CREAT`, and when using `O_CREAT` you must pass the permissions (e.g., `0644`).

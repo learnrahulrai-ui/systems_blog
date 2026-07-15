@@ -1,0 +1,13 @@
+@title Mistake 17: Partial Reads and Kernel Buffers The 212KB Wall :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: PARTIAL READS AND KERNEL BUFFERS THE 212KB WALL
+  Mistake 17: Partial Reads and Kernel Buffers The 212KB Wall
+  ============================================================================================
+
+
+  The OS does not wait for a full `read()` request to arrive. If you request 3MB, the OS simply returns whatever is currently in the Kernel Receive Buffer (max ~212KB on Windows) and instantly returns control to you. You MUST use a loop (`while(total_read < requested_bytes)`) to read large amounts of data.

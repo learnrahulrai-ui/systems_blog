@@ -1,0 +1,67 @@
+@title Lesson 3: Lesson 3: The Full Execution Chain (End-to-End) :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 3: LESSON 3: THE FULL EXECUTION CHAIN (END-TO-END)
+  Lesson 3: Lesson 3: The Full Execution Chain (End-to-End)
+  ============================================================================================
+
+
+
+  We can now map the complete journey of a single integer (the `client_socket`) from the moment the OS accepts the connection, across the thread boundary, and into the `handleClient` function.
+
+  --------
+  THE SETUP
+  1. The Main Thread creates the `ThreadPool` at address `0x5000`.
+  2. The `ThreadPool` constructor generates the **WorkerLambda**, copies `0x5000` into its backpack, and passes it to `std::thread`.
+  3. The Worker Thread spins up and enters `WorkerLambda::operator()`.
+  4. The Main Thread creates the `Server` at address `0x1000`.
+  5. The Main Thread accepts a connection, yielding `client_socket = 42`.
+  6. The Main Thread generates the **ServerLambda**, copies `0x1000` and `42` into its backpack.
+  7. The Main Thread wraps the ServerLambda inside a `std::function` and drops it in the queue.
+
+  --------
+  THE EXECUTION STACK
+  When the Worker Thread pulls the `std::function` out of the queue and executes it, the call stack transforms dramatically. Each layer is a distinct C++ class invoking the next, and each layer receives its own isolated `this` pointer.
+
+  Here is the actual Windows Debugger (`cdb.exe`) stack trace proving this reality:
+
+```text
+--- FRAME 6: WorkerLambda::operator() ---
+06 dump_all_this!<lambda_73fe...>::operator()
+000000e8`f53ff830 class main::__l2::<lambda_73fe...> * this = 0x00000287`56d08b60
+
+        ↓ (WorkerLambda calls task())
+
+--- FRAME 5: std::function::operator() ---
+05 dump_all_this!std::_Func_class<void>::operator()
+000000e8`f53ff800 class std::_Func_class<void> * this = 0x00000287`56d08b60
+
+        ↓ (std::function unpacks the stored callable)
+
+--- FRAME 2: ServerLambda::operator() ---
+02 dump_all_this!<lambda_a8ad...>::operator()
+000000e8`f53ff760 class main::__l2::<lambda_a8ad...> * this = 0x00000287`56d08b68
+
+        ↓ (ServerLambda unpacks its backpack and calls captured_server->handleClient)
+
+--- FRAME 1: Server::handleClient ---
+01 dump_all_this!Server::handleClient
+000000e8`f53ff730 class Server * this = 0x000000e8`f52ff730
+```
+
+  --------
+  THE FINAL REALITY
+  Look precisely at the types of the `this` pointers:
+  1. `class main::__l2::<lambda_73fe...>` (The Worker Lambda)
+  2. `class std::_Func_class<void>` (The `std::function` wrapper)
+  3. `class main::__l2::<lambda_a8ad...>` (The Server Lambda)
+  4. `class Server` (The Server)
+
+  Even when the raw numeric memory addresses look similar due to heavily optimized heap allocations and local stack scopes, the C++ type system strictly separates them.
+
+  The Worker Lambda never magically transforms into the Server. It is just an object, calling a wrapper object, calling another object, which finally triggers the server object. This is the mechanical reality of asynchronous C++.
+

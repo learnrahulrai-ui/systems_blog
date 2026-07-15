@@ -1,0 +1,59 @@
+@title Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug) :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 8: LESSON 8: TOTAL DATA LOSS (THE POWER OUTAGE BUG)
+  Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug)
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  Because your lambda only allowed `Logger::processQueue()` to wake up when `stop_` became true, your server was running a "Flush-on-Shutdown" strategy.
+
+  To simulate what happens when this carelessness meets reality, I built `experiment/todo4_power_outage_bug.cpp`.
+
+```text
+int main() {
+    BadLogger* logger = new BadLogger();
+    
+    // Simulate 5 users buying things
+    for (int i = 1; i <= 5; ++i) {
+        logger->log("User purchased item " + std::to_string(i));
+    }
+    
+    // Hard crash before ~Logger can execute!
+    std::abort(); 
+}
+```
+
+  --------
+  THE EXECUTION RESULT
+  When I ran the experiment, the server accepted 5 critical user transactions. But then the server process suffered a fatal `std::abort()` (Exit Code 1).
+
+  Because the program hard-crashed, **`Logger::~Logger()` never executed.**
+
+  Because `~Logger()` never executed, `stop_` was never set to true.
+
+  Because `stop_` was never set to true, `Logger::processQueue()` never woke up.
+
+  Because it never woke up, those 5 transactions were never popped or written to disk. They were violently purged from RAM when the OS killed the process.
+
+  **Total data loss.** If this was production, you just lost all record of those 5 purchases, and the customers will be very angry when their items never ship.
+
+  --------
+  THE FIX
+  You must write logs to disk the exact millisecond they enter the queue!
+
+```text
+cv_.wait(lock, [this]() { 
+    return stop_ || !log_queue_.empty(); 
+});
+```
+
+  By adding `|| !log_queue_.empty()`, `Logger::processQueue()` pops and writes "User purchased item 1" to the hard drive immediately. If the server crashes 500 milliseconds later, it doesn't matter—the data is safely saved on the permanent disk!
+

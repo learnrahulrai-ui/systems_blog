@@ -1,0 +1,13 @@
+@title Mistake 4: strcpy vs strncpy signature :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: STRCPY VS STRNCPY SIGNATURE
+  Mistake 4: strcpy vs strncpy signature
+  ============================================================================================
+
+
+     Tried to pass 3 arguments (dest, src, len) to `strcpy`. This is the signature for `strncpy`. `strcpy` only takes 2 arguments (dest, src).

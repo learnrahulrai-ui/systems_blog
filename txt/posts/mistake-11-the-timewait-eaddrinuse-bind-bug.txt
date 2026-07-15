@@ -1,0 +1,13 @@
+@title Mistake 11: The TIME_WAIT / EADDRINUSE bind bug :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: THE TIME_WAIT / EADDRINUSE BIND BUG
+  Mistake 11: The TIME_WAIT / EADDRINUSE bind bug
+  ============================================================================================
+
+
+      If a server closes a connection and exits, the OS holds the port in a TIME_WAIT state to catch delayed packets. Restarting the server instantly throws "Address already in use". The fix is `setsockopt(..., SO_REUSEADDR, ...)`. Note: Cygwin/Windows hides this by allowing rebinds, but Linux strictly crashes without it.

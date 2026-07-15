@@ -1,0 +1,13 @@
+@title Mistake 12: The Ghost Connection ECONNABORTED accept bug :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: THE GHOST CONNECTION ECONNABORTED ACCEPT BUG
+  Mistake 12: The Ghost Connection ECONNABORTED accept bug
+  ============================================================================================
+
+
+      The OS completes the TCP handshake *before* your code calls `accept()`. If a client connects and then instantly sends a kill signal (Ctrl+C) before `accept()` runs, the connection dies in the queue. When `accept()` finally grabs it, it returns `-1`. Without error checking, the server blindly calls `write(-1)`, failing silently or crashing. On Linux, a blocking `accept()` might freeze forever waiting for a new connection. The fix is making the socket non-blocking (`O_NONBLOCK`).

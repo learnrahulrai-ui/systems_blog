@@ -1,0 +1,64 @@
+@title Lesson 11: Lesson 11: The Truncated Shutdown Bug :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 11: LESSON 11: THE TRUNCATED SHUTDOWN BUG
+  Lesson 11: Lesson 11: The Truncated Shutdown Bug
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+  You asked what happens if we remove `&& log_queue_.empty()` from the loop termination check:
+```text
+// Bug: Missing the queue check!
+if (stop_) {
+    break; 
+}
+```
+
+  I created `experiment/todo4_truncated_shutdown_bug.cpp` to simulate this. The Main Thread pushes 5 critical logs rapidly, but before the slow hard drive can finish writing them, the Main Thread initiates a clean server shutdown.
+
+  --------
+  THE EXECUTION RESULT
+  When I ran the experiment, here is exactly what happened:
+
+```text
+[main] Starting program...
+[main] Server is busy! Pushing 5 critical logs rapidly...
+[main] Normal server shutdown triggered!
+
+[Main Thread] Shutting down. Setting stop_ = true...
+[Background Thread] Wrote to disk: Critical Transaction 1
+[Background Thread] stop_ is true! I am exiting immediately without draining the queue!
+[Background Thread] Logs remaining in queue: 4 (THESE WILL BE LOST FOREVER)
+[main] Program ended successfully.
+```
+
+  --------
+  THE EXPLANATION (WHY IT FAILED)
+  When `stop_` was set to true by the Main Thread, there were still 4 logs sitting in the queue waiting to be written!
+
+  The Background Thread woke up, popped "Critical Transaction 1", and wrote it to disk.
+  Then, the `while (true)` loop circled back to the top. It hit your broken `if` statement:
+```text
+if (stop_) break;
+```
+  Because `stop_` is true, the `if` statement evaluated to true! The Background Thread instantly broke out of the loop and died, completely abandoning the remaining 4 logs in the queue. They were permanently destroyed.
+
+  --------
+  THE FIX
+  This is why the draining condition must check **both** variables:
+```text
+if (stop_ && log_queue_.empty()) {
+    break;
+}
+```
+  With this correct logic, the Background Thread says: *"Okay, `stop_` is true. But the queue still has 4 items in it! Therefore, `log_queue_.empty()` is false. The condition fails! I must skip the `break`, loop around, and write the next log."*
+
+  It will forcefully stay alive, popping and writing logs, until the queue finally reaches 0. Only then does it allow itself to `break` and die.
+

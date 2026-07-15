@@ -1,0 +1,86 @@
+@title Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 23: LESSON 23: THREE REQUESTS, ONE STOP — THE ITERATION COUNT
+  Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count
+  ============================================================================================
+
+
+
+  --------
+  THE PATTERN
+
+  For **N requests + 1 stop**, the while loop runs **N + 1** iterations:
+
+  - **N iterations**: pop each message and add to `pending_`
+  - **1 final iteration**: detect `stop_ && empty` → `flushPending()` → `break`
+
+  --------
+  THE EXPERIMENT
+
+  File: `experiment/test_three_req_one_stop.cpp`
+
+  --------
+  TRACE
+
+```text
+[main] Request 1 arrives
+[processQueue] Iteration 1 — stop_=0 queue_size=1 pending_size=0
+[processQueue] Popped "Request 1: User logged in" pending_ now 26 bytes
+
+[main] Request 2 arrives
+[processQueue] Iteration 2 — stop_=0 queue_size=1 pending_size=26
+[processQueue] Popped "Request 2: User clicked button" pending_ now 57 bytes
+
+[main] Request 3 arrives
+[processQueue] Iteration 3 — stop_=0 queue_size=1 pending_size=57
+[processQueue] Popped "Request 3: User saved document" pending_ now 88 bytes
+
+[main] Shutdown signal received
+[~Logger] stop_=true, notify_one
+
+[processQueue] Iteration 4 — stop_=1 queue_size=0 pending_size=88
+[processQueue] stop && empty → flushing pending_ and breaking
+[flushPending] Writing to disk: all 3 requests batched together
+
+[main] PASS: Exactly 3 logs written
+```
+
+  --------
+  KEY OBSERVATION
+
+  The 3 log messages are **batched** into `pending_` and flushed as one write:
+
+```text
+"Request 1: User logged in
+Request 2: User clicked button
+Request 3: User saved document"
+```
+
+  This is the batch-write optimization — 3 log lines, 1 `fprintf` call.
+
+  --------
+  WHY THE WHILE LOOP MUST ITERATE N+1 TIMES
+
+  | Iteration | stop_ | queue | Action |
+  |-----------|-------|-------|--------|
+  | 1 | F | 1 | Pop msg → `pending_` → loop |
+  | 2 | F | 1 | Pop msg → `pending_` → loop |
+  | 3 | F | 1 | Pop msg → `pending_` → loop |
+  | 4 | **T** | **0** | **flushPending() → break** |
+
+  If you broke on `stop_` alone (without `&& empty`), you'd break at iteration 4 with queue=0 but `pending_` still has 88 bytes unflushed. `if (stop_ && log_queue_.empty())` ensures the buffer is flushed before exiting.
+
+  --------
+  THE GENERAL RULE
+
+```text
+iterations = requests + 1
+```
+
+  Each request takes one iteration to pop. The final iteration detects the empty queue after shutdown and flushes the accumulated buffer.
+

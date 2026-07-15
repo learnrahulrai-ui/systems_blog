@@ -1,0 +1,115 @@
+@title Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 22: LESSON 22: ONE REQUEST, ONE STOP — THE WHILE LOOP PROVES IT
+  Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It
+  ============================================================================================
+
+
+
+  --------
+  THE SETUP
+
+```text
+main()
+  ├── ThreadPool (16 workers)
+  ├── Logger (1 background writer, sleeping on cv_.wait)
+  └── Server::start()
+        └── acceptClientRequest()
+              └── handleClient()
+                    └── LOG_INFO("Received GET request for /hello")
+```
+
+  --------
+  THE SCENARIO
+
+  **Exactly one request arrives.** Then someone hits cancel/shutdown. No more requests.
+
+  --------
+  STEP-BY-STEP
+
+  **1st second — request arrives:**
+
+```text
+handleClient()
+  → Logger::log("Received GET request for /hello")
+    → format timestamp + level
+    → { lock; queue.push(msg); unlock; }     ← msg is now in log_queue_
+    → cv_.notify_one()
+
+processQueue() — was sleeping on cv_.wait
+  → cv_.wait(lock, stop_ || !empty?)
+    → predicate: stop_=F, !empty=T → PASS
+  → if (stop_ && empty?) → F && F → skip
+  → msg = front(); pop(); unlock()
+  → pending_ += "Received GET request for /hello\n"
+  → pending_.size() < 4096 → no flush
+  → loop back to cv_.wait
+```
+
+  **Shutdown signal arrives:**
+
+```text
+~Logger()
+  → { lock; stop_ = true; unlock; }
+  → cv_.notify_one()
+
+processQueue() — was sleeping on cv_.wait
+  → cv_.wait(lock, stop_ || !empty?)
+    → predicate: stop_=T → PASS
+  → if (stop_ && empty?)
+    → stop_=T, empty? queue is EMPTY (we already popped it)
+    → T && T = TRUE
+    → flushPending()  ← writes "Received GET request for /hello\n" to disk!
+    → break           ← exits while loop
+```
+
+  **Key insight:** The while loop iterates **twice** for one request + one shutdown:
+
+  | Iteration | stop_ | queue | What happens |
+  |-----------|-------|-------|-------------|
+  | 1st | F | NonEmpty | Pop msg → `pending_ += msg` → loop |
+  | 2nd | T | Empty | `flushPending()` → **break** |
+
+  --------
+  THE EXPERIMENT
+
+  File: `experiment/test_one_req_one_stop.cpp`
+
+  **Output:**
+```text
+[main] === TEST: One request, one stop ===
+[main] 1st second: request arrives
+[main] Shutdown signal received
+[~Logger] Shutdown started
+[flushPending] Writing to disk: "Request 1: User logged in"
+[processQueue] Exited loop
+[~Logger] Shutdown done
+
+[main] === VERIFYING LOG FILE ===
+  Line 1: "Request 1: User logged in"
+[main] PASS: Exactly 1 log written
+```
+
+  --------
+  WHY THIS WORKS
+
+  1. `log()` only pushes to queue and notifies — it does **not** check `stop_`
+  2. `processQueue()` has the **exit guard**: `if (stop_ && empty()) { flushPending(); break; }`
+  3. The while loop guarantees that shutdown waits for the queue to drain before breaking
+  4. `flushPending()` runs **twice**: once in the break path, once in `~Logger()` as safety net
+
+  --------
+  THE LESSON
+
+  **You must enter the while loop twice for one request + one shutdown:**
+
+  - First entry: process the message (queue non-empty, stop_ doesn't matter)
+  - Second entry: detect stop_ + empty queue → flush pending buffer → exit
+
+  If you broke on `stop_` alone (without checking `empty()`), you would lose the message.
+

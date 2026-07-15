@@ -1,0 +1,136 @@
+@title Lesson 17: Lesson 17: The Ultimate 80-Test Matrix :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- LESSON 17: LESSON 17: THE ULTIMATE 80-TEST MATRIX
+  Lesson 17: Lesson 17: The Ultimate 80-Test Matrix
+  ============================================================================================
+
+
+
+  I built a C++ test framework that compiled all 8 logic permutations and executed 10 edge-case test cases against each version, capturing the exact point of failure using a timeout supervisor.
+
+  --------
+  V1: PERFECT PATTERN (WAIT(STOP||!EMPTY), IF(STOP&&EMPTY) BREAK;)
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | ✅ SUCCESS |
+  | Single Log Runtime | ✅ SUCCESS |
+  | Burst Logs Runtime | ✅ SUCCESS |
+  | Spurious Wakeup | ✅ SUCCESS |
+  | Truncated Shutdown | ✅ SUCCESS |
+  | Late Shutdown | ✅ SUCCESS |
+  | Log after Spurious | ✅ SUCCESS |
+  | Staggered Logs | ✅ SUCCESS |
+  | Massive Backlog Shutdown | ✅ SUCCESS |
+  | Immediate Shutdown | ✅ SUCCESS |
+
+  --------
+  V2: MISSING STOP_ IN LAMBDA
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Single Log Runtime | 🔒 DEADLOCK (Thread hung forever) |
+  | Burst Logs Runtime | 🔒 DEADLOCK (Thread hung forever) |
+  | Spurious Wakeup | 🔒 DEADLOCK (Thread hung forever) |
+  | Truncated Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Late Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Log after Spurious | 🔒 DEADLOCK (Thread hung forever) |
+  | Staggered Logs | 🔒 DEADLOCK (Thread hung forever) |
+  | Massive Backlog Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Immediate Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+
+  --------
+  V3: MISSING !EMPTY IN LAMBDA
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | ✅ SUCCESS |
+  | Single Log Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Burst Logs Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Spurious Wakeup | ✅ SUCCESS |
+  | Truncated Shutdown | ✅ SUCCESS |
+  | Late Shutdown | ✅ SUCCESS |
+  | Log after Spurious | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Staggered Logs | ✅ SUCCESS |
+  | Massive Backlog Shutdown | ✅ SUCCESS |
+  | Immediate Shutdown | ✅ SUCCESS |
+
+  --------
+  V4: MISSING STOP_ IN BREAK
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | ✅ SUCCESS |
+  | Single Log Runtime | ✅ SUCCESS |
+  | Burst Logs Runtime | ✅ SUCCESS |
+  | Spurious Wakeup | ✅ SUCCESS |
+  | Truncated Shutdown | ✅ SUCCESS |
+  | Late Shutdown | ✅ SUCCESS |
+  | Log after Spurious | ✅ SUCCESS |
+  | Staggered Logs | ✅ SUCCESS |
+  | Massive Backlog Shutdown | ✅ SUCCESS |
+  | Immediate Shutdown | ✅ SUCCESS |
+
+  --------
+  V5: MISSING EMPTY IN BREAK
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | ✅ SUCCESS |
+  | Single Log Runtime | ✅ SUCCESS |
+  | Burst Logs Runtime | ✅ SUCCESS |
+  | Spurious Wakeup | ✅ SUCCESS |
+  | Truncated Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
+  | Late Shutdown | ✅ SUCCESS |
+  | Log after Spurious | ✅ SUCCESS |
+  | Staggered Logs | ✅ SUCCESS |
+  | Massive Backlog Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
+  | Immediate Shutdown | ✅ SUCCESS |
+
+  --------
+  V6: MISSING BREAK CLAUSE COMPLETELY
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | 💀 CRASH (Segfault on empty queue) |
+  | Single Log Runtime | 💀 CRASH (Segfault on empty queue) |
+  | Burst Logs Runtime | 💀 CRASH (Segfault on empty queue) |
+  | Spurious Wakeup | 💀 CRASH (Segfault on empty queue) |
+  | Truncated Shutdown | 💀 CRASH (Segfault on empty queue) |
+  | Late Shutdown | 💀 CRASH (Segfault on empty queue) |
+  | Log after Spurious | 💀 CRASH (Segfault on empty queue) |
+  | Staggered Logs | 💀 CRASH (Segfault on empty queue) |
+  | Massive Backlog Shutdown | 💀 CRASH (Segfault on empty queue) |
+  | Immediate Shutdown | 💀 CRASH (Segfault on empty queue) |
+
+  --------
+  V7: MISSING STOP_ IN BOTH
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Single Log Runtime | 🔒 DEADLOCK (Thread hung forever) |
+  | Burst Logs Runtime | 🔒 DEADLOCK (Thread hung forever) |
+  | Spurious Wakeup | 🔒 DEADLOCK (Thread hung forever) |
+  | Truncated Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Late Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Log after Spurious | 🔒 DEADLOCK (Thread hung forever) |
+  | Staggered Logs | 🔒 DEADLOCK (Thread hung forever) |
+  | Massive Backlog Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  | Immediate Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+
+  --------
+  V8: MISSING EMPTY IN BOTH
+  | Test Case | Result |
+  |---|---|
+  | Idle Shutdown | ✅ SUCCESS |
+  | Single Log Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Burst Logs Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Spurious Wakeup | ✅ SUCCESS |
+  | Truncated Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
+  | Late Shutdown | ✅ SUCCESS |
+  | Log after Spurious | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
+  | Staggered Logs | ✅ SUCCESS |
+  | Massive Backlog Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
+  | Immediate Shutdown | ✅ SUCCESS |
+
+

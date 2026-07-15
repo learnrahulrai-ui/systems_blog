@@ -1,0 +1,13 @@
+@title Mistake 8: File existence for reading :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: FILE EXISTENCE FOR READING
+  Mistake 8: File existence for reading
+  ============================================================================================
+
+
+     `open(O_RDONLY)` will fail (return -1) if the file doesn't exist yet. The consumer must handle this if it starts before the support process.

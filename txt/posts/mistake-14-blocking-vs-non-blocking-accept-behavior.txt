@@ -1,0 +1,13 @@
+@title Mistake 14: Blocking vs Non-Blocking accept Behavior :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- IPC MISTAKE: BLOCKING VS NON-BLOCKING ACCEPT BEHAVIOR
+  Mistake 14: Blocking vs Non-Blocking accept Behavior
+  ============================================================================================
+
+
+      - **Blocking (No `fcntl`)**: `accept()` waits FOREVER for a client. The only way it stops is if a client connects, or you manually kill the server with `Ctrl+C`.
