@@ -252,3 +252,4 @@ SETUP.md
 # Local GitHub CLI download used for the one-time setup -- never part of the site.
 gh.zip
 gh_cli/
+chat_logs/
