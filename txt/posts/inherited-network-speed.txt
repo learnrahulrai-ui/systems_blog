@@ -206,6 +206,52 @@
   (the window is a live value the kernel is raising and lowering); what does not vary is that
   they are always whole blocks, and always inherited across processes that share the route.
 
+  --------
+  SEAM. The reasoning ends here; below, the same numbers checked in C++.
+
+  The claim is that every measured total is a whole number of 212,992-byte blocks with nothing
+  left over. Here is that claim as a program you can compile and run -- hardcoded totals copied
+  from the terminal, no loops, nothing hidden. A single non-zero remainder would sink the whole
+  block story.
+
+```cpp
+#include <cstdio>
+
+int main() {
+    long b = 212992;      // 1 block = 208 * 1024 = 208 KiB
+
+    // plain 100 MB buffer run: five totals copied from the terminal
+    long a1 = 1064960;    // 1064960 / 212992 = 5
+    long a2 = 1277952;    // 1277952 / 212992 = 6
+    long a3 = 2129920;    // 2129920 / 212992 = 10
+    long a4 = 1703936;    // 1703936 / 212992 = 8
+    long a5 = 1277952;    // 1277952 / 212992 = 6
+    printf("plain:  %ld %ld %ld %ld %ld\n", a1/b, a2/b, a3/b, a4/b, a5/b);  // 5 6 10 8 6
+    printf("rem:    %ld %ld %ld %ld %ld\n", a1%b, a2%b, a3%b, a4%b, a5%b);  // 0 0 0 0 0
+
+    // VirtualLock (pinned 100 MB) run: five more totals
+    long c1 = 1064960;    // 1064960 / 212992 = 5
+    long c2 = 2768896;    // 2768896 / 212992 = 13
+    long c3 = 1490944;    // 1490944 / 212992 = 7
+    long c4 = 1277952;    // 1277952 / 212992 = 6
+    long c5 = 2981888;    // 2981888 / 212992 = 14
+    printf("pinned: %ld %ld %ld %ld %ld\n", c1/b, c2/b, c3/b, c4/b, c5/b);  // 5 13 7 6 14
+    printf("rem:    %ld %ld %ld %ld %ld\n", c1%b, c2%b, c3%b, c4%b, c5%b);  // 0 0 0 0 0
+    return 0;
+}
+```
+
+  Running this prints:
+
+      plain:  5 6 10 8 6
+      rem:    0 0 0 0 0
+      pinned: 5 13 7 6 14
+      rem:    0 0 0 0 0
+
+  Every remainder is zero, in both runs. The capacity never lands between blocks, so the block
+  -- 212,992 bytes -- is a real allocation unit the kernel hands out for this route, not a number
+  your program picked.
+
   >> STANDARD NAMES
      push capacity / bytes-before-not-now  -> the socket send buffer the kernel will hold (bounded by cwnd)
      not-now refusal                       -> EAGAIN on a non-blocking socket

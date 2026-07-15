@@ -31,3 +31,30 @@
 
   waiting on many sockets at once with one call
       -> readiness multiplexing (poll / epoll / IOCP)
+
+  the receiver being full pushing back on the sender until it slows down
+      -> backpressure
+
+  handing the network card a buffer without copying it again first
+      -> zero-copy
+
+  the CPU dropping one job and picking up another, saving and reloading its state
+      -> context switch
+
+  the CPU asking for memory that is not resident yet, so the kernel fetches it
+      -> page fault
+
+  a closed connection kept around a while so late packets do not confuse a new one
+      -> TIME_WAIT
+
+  holding back tiny sends to bundle them into one bigger packet
+      -> Nagle's algorithm
+
+  the largest chunk a link will carry without splitting it
+      -> MTU (maximum transmission unit)
+
+  the small integer the kernel hands you to name an open file or socket
+      -> file descriptor (fd)
+
+  a single trip from your program into the kernel and back
+      -> system call (syscall)
