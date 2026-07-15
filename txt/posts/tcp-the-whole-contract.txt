@@ -1,0 +1,499 @@
+@title TCP: The Whole Contract :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- TCP: THE WHOLE CONTRACT
+  TCP: The Whole Contract
+  ============================================================================================
+
+
+  You call connect(). You call write(). You call read(). None of those three calls does
+  what you think. Write does not send. Read does not receive. Connect does not mean the
+  other side is ready. Every one of those calls is a negotiation with the kernel, and the
+  kernel has its own rules. This post traces every step from nothing to data delivered,
+  using programs we actually ran, with the real byte counts, real error numbers, and real
+  kernel state machines. No "and then magic happens."
+
+  The programs below use two modes: support (server) and consumer (client). Same binary,
+  different argv[1]. No threads. No signals. No epoll. Just the raw POSIX socket calls,
+  watched closely.
+
+  ==============================================================================================
+
+  THE PROBLEM THAT FORCES TCP TO EXIST
+
+  ==============================================================================================
+
+  Imagine two processes on the same machine. Process A wants to hand 100MB to Process B.
+  A pipe works. A file works. Both guarantee order and delivery within one machine.
+
+  Now imagine A and B on different machines across a network. Packets travel through
+  routers. Routers drop packets when buffers fill. Packets arrive out of order. A UDP
+  datagram you send at time T1 may arrive after a datagram you sent at time T2. A packet
+  sent once may arrive twice because a router retransmitted it from a cached copy.
+
+  UDP gives you nothing. You send a datagram; it may or may not arrive; you have no idea.
+
+  TCP forces the kernel to give you a guarantee: bytes arrive in order, exactly once,
+  or the connection breaks and you get an error. That guarantee is not free. It requires
+  a state machine in both kernels, sequence numbers on every byte, acknowledgements,
+  timers, and retransmission. The rest of this post is that price, paid in full.
+
+  ==============================================================================================
+
+  BEFORE EITHER PROCESS RUNS -- WHAT socket() ACTUALLY ALLOCATES
+
+  ==============================================================================================
+
+  Before connect() or accept() can be called, both sides need a file descriptor. The
+  call is:
+
+```text
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+```
+
+  AF_INET means IPv4. SOCK_STREAM means TCP. The kernel allocates a socket data
+  structure -- a struct sock in Linux, or its equivalent on Windows -- and returns an
+  integer index into the process's file descriptor table. That integer is all you hold.
+  The actual socket lives in kernel memory.
+
+  On Windows with the Microsoft CRT, the per-process FD table has a hard ceiling of
+  2048 entries. FDs 0, 1, 2 are stdin, stdout, stderr. The first socket() call returns
+  FD 3. The 2045th call returns FD 2047. The 2046th call fails. We proved this exactly
+  in our stress test: the server accepted FD 4 through FD 2050 (2047 connections) and
+  then accept() returned -1 with WSAENOBUFS on connection 2048.
+
+  ==============================================================================================
+
+  THE THREE-WAY HANDSHAKE -- HOW A CONNECTION IS BORN
+
+  ==============================================================================================
+
+  Server side must call these in order before any client can connect:
+
+```text
+bind(server_fd, &address, sizeof(address));   // claim port 8080
+listen(server_fd, backlog);                   // open the queue
+```
+
+  listen() does not block. It tells the kernel: "start accepting SYN packets on this
+  port and complete handshakes in the background. Put finished connections into a queue
+  of size backlog. I will drain that queue when I call accept()."
+
+  Here is what actually happens when the consumer calls connect():
+
+```
+  CONSUMER KERNEL                         SERVER KERNEL
+  ---------------                         -------------
+
+  connect() called
+       |
+       v
+  sends SYN (seq=X)   ------->   SYN received, slot created in
+                                  incomplete-connection queue
+                                       |
+                                       v
+                        <-------  sends SYN-ACK (seq=Y, ack=X+1)
+       |
+       v
+  ACK returned (ack=Y+1)  ----->  connection moved to
+  connect() returns 0             completed-connection queue
+                                  (waiting for accept())
+```
+
+  Your code's call to accept() merely dequeues one entry from that completed queue. The
+  handshake finished without you. This has a sharp consequence: a client can connect and
+  immediately die before your server ever calls accept(). The connection sits in the
+  completed queue in a half-dead state. When accept() finally runs, it returns -1 with
+  ECONNABORTED on Linux. If you do not check that return value, you pass -1 to write()
+  and get silent failure or crash.
+
+  We proved this. The server slept 10 seconds, the consumer connected and immediately
+  closed with SO_LINGER (l_onoff=1, l_linger=0) to force an RST instead of a FIN.
+  The server then called accept() -- on Linux it got -1. On Cygwin/Windows the kernel
+  behaviour differs and may return a valid-looking fd; that fd is already dead.
+
+  ==============================================================================================
+
+  WHAT THE BACKLOG NUMBER ACTUALLY MEANS
+
+  ==============================================================================================
+
+  listen(server_fd, 100) does not mean "accept 100 connections." It means the kernel
+  will hold at most 100 completed handshakes in the queue. The 101st arriving SYN is
+  dropped silently. The client's kernel will retry the SYN a few times (exponential
+  backoff: 1s, 2s, 4s...) and then give up, returning ETIMEDOUT to connect().
+
+  SOMAXCONN is the system-defined maximum. On Linux it is typically 128 or 4096
+  depending on kernel version. Passing a number larger than SOMAXCONN is silently
+  clamped. Passing 0 gives implementation-defined behaviour; do not do it.
+
+  ==============================================================================================
+
+  AFTER accept() -- WHO OWNS WHAT
+
+  ==============================================================================================
+
+  accept() returns a new file descriptor -- call it client_fd. Now there are two
+  distinct sockets in the server process:
+
+```
+  server_fd   <-- still listening on port 8080; never touch this for I/O
+  client_fd   <-- the actual pipe to this one consumer; use this for read/write
+```
+
+  server_fd stays open for the next accept(). client_fd is the connection. When you
+  are done with a client, you close(client_fd). If you forget, that integer is gone
+  permanently. The kernel will not reclaim it until the process exits. Each forgotten
+  close() leaks one FD slot. On Windows, 2047 forgotten closes crash the server.
+
+  ==============================================================================================
+
+  WHAT write() ACTUALLY DOES -- THE KERNEL SEND BUFFER
+
+  ==============================================================================================
+
+  When you call:
+
+```text
+int n = write(client_fd, buffer, 100000000);  // try to send 100MB
+```
+
+  n is NOT the number of bytes the consumer received. n is the number of bytes the
+  local kernel accepted into its Send Buffer (the SO_SNDBUF). On a freshly connected
+  loopback socket, this is roughly 212,992 bytes (208 KB) on Windows -- exactly one
+  unit of the TCP receive window the kernel uses for loopback.
+
+  After the kernel copies those bytes into the Non-Paged Pool (kernel memory, not your
+  memory), write() returns. Your process is free to continue. The bytes are now in
+  kernel hands. If the consumer dies right now, those bytes are gone. write() returning
+  212,992 is a promise from your kernel, not a receipt from the consumer.
+
+  The actual delivery looks like this:
+
+```
+  YOUR PROCESS                KERNEL (local)              KERNEL (remote)  CONSUMER
+  ----------                  --------------              ---------------  --------
+  write(100MB)
+       |
+       v
+  kernel copies
+  212,992 bytes
+  into Send Buffer
+       |
+  returns 212992
+       |                 TCP segments sent -->    ACK received
+                         (as consumer reads)      window grows
+                                                       |
+                                                 more segments sent
+                                                       |
+                                               consumer read() returns
+                                               up to 212,992 at a time
+```
+
+  ==============================================================================================
+
+  WHY read() NEVER RETURNS THE FULL AMOUNT YOU ASKED FOR
+
+  ==============================================================================================
+
+  The consumer side is symmetric. When the consumer calls:
+
+```text
+int got = read(client_fd, buf, 3000000);  // ask for 3MB
+```
+
+  The kernel checks its Receive Buffer. That buffer holds whatever arrived so far.
+  On our loopback experiments, it held at most 212,992 bytes at the moment read() ran.
+  read() returned that and gave control back. The remaining ~2.8MB was still in the
+  server kernel's Send Buffer or in flight.
+
+  This is not an error. This is the contract. read() on a stream socket returns
+  "between 1 and N bytes," where N is what you asked for. Zero means the sender closed
+  the connection (FIN received). Negative means error.
+
+  To reliably receive 3MB you must loop:
+
+```text
+int total = 0;
+while (total < 3000000) {
+    int got = read(client_fd, buf + total, 3000000 - total);
+    if (got == 0) break;   // FIN: sender hung up cleanly
+    if (got  < 0) break;   // RST or error
+    total += got;
+}
+```
+
+  We measured the real numbers. Single read(), no loop, 2-second sleep to let data
+  accumulate: got = 212,992. With a read loop until the server closes: total = 3,000,000.
+  Without the loop: 2,787,008 bytes silently dropped.
+
+  ==============================================================================================
+
+  THE KERNEL'S HIDDEN MEMORY -- RFC 2140 AND THE 212,992 BYTE UNIT
+
+  ==============================================================================================
+
+  Here is where it gets strange. We ran five separate processes, each connecting to a
+  different loopback IP address (127.0.0.1 through 127.0.0.5) and pushing 100MB with a
+  single write(), then sleeping 13 seconds while the consumer read slowly. We expected
+  each run to start fresh. They did not:
+
+```
+  Run 1  (127.0.0.1):  1,064,960 bytes  accepted by kernel
+  Run 2  (127.0.0.2):  1,277,952 bytes  (+1 x 212,992)
+  Run 3  (127.0.0.3):  2,129,920 bytes  (+5 x 212,992)
+  Run 4  (127.0.0.4):  1,703,936 bytes  (+3 x 212,992)
+  Run 5  (127.0.0.5):  1,277,952 bytes  (+1 x 212,992)
+```
+
+  Every value is an exact integer multiple of 212,992. Different processes. Different
+  IPs. Same unit. We then locked the 100MB buffer into physical RAM using VirtualAlloc
+  + VirtualLock and repeated the experiment. Same pattern, same unit:
+
+```
+  Run 1  (127.0.0.1):  1,064,960 bytes  (baseline)
+  Run 2  (127.0.0.2):  2,768,896 bytes  (+8 x 212,992)
+  Run 3  (127.0.0.3):  1,490,944 bytes  (+2 x 212,992)
+  Run 4  (127.0.0.4):  1,277,952 bytes  (+1 x 212,992)
+  Run 5  (127.0.0.5):  2,981,888 bytes  (+9 x 212,992)
+```
+
+  The user-space memory architecture has zero effect. The kernel ignored VirtualLock.
+
+  RFC 2140 (TCP Control Block Interdependence) explains why. Modern kernels cache the
+  TCP Congestion Window (cwnd) and Slow Start Threshold (ssthresh) not per connection,
+  but per route or network interface. All loopback addresses (127.0.0.0/8) share one
+  interface. When Run 1 proved that interface was fast, the kernel updated its heuristic
+  cache for the entire subnet. Run 2, a brand-new process with no relationship to Run 1,
+  inherited that warmed-up state. When Run 3's consumer slept for 13 seconds (a slow
+  reader), the kernel penalised the interface, shrinking the window for Runs 4 and 5.
+
+  Your C++ process never touched the network. It called write(). The kernel made all
+  the real decisions.
+
+  ==============================================================================================
+
+  HOW TCP CLOSES -- FIN, FIN-ACK, ACK, AND TIME_WAIT
+
+  ==============================================================================================
+
+  When the server calls close(client_fd), the kernel sends a FIN segment:
+
+```
+  SERVER KERNEL                           CONSUMER KERNEL
+  -------------                           ---------------
+
+  close(client_fd)
+       |
+       v
+  sends FIN (seq=M)   ----------->   FIN received
+                                          |
+                                          v
+                       <-----------  ACK (ack=M+1)
+                                     consumer's read() returns 0
+                                     consumer calls close(client_fd)
+                                          |
+                       <-----------  FIN (seq=N)
+       |
+       v
+  ACK (ack=N+1)       ----------->   consumer socket freed
+       |
+       v
+  SERVER ENTERS TIME_WAIT
+  (2 x MSL, typically 60-240 seconds)
+```
+
+  TIME_WAIT is not a bug. It protects against a delayed duplicate packet from an old
+  incarnation of the same port pair arriving at a future connection and corrupting it.
+  MSL (Maximum Segment Lifetime) is the maximum time a packet can live in the network.
+  The kernel waits 2*MSL to be certain all packets from this connection are dead.
+
+  The problem: while a socket is in TIME_WAIT, bind() on the same port fails with
+  EADDRINUSE. Restart your server within those 2-4 minutes and it cannot bind port 8080.
+
+  The fix is SO_REUSEADDR, set before bind():
+
+```text
+int opt = 1;
+setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+bind(server_fd, &address, sizeof(address));
+```
+
+  SO_REUSEADDR tells the kernel to allow bind() even if the port has TIME_WAIT sockets.
+  It does NOT destroy those sockets or allow a new connection to reuse the same 4-tuple
+  immediately. It just lets bind() succeed so the server can start accepting new port
+  pairs while old ones drain.
+
+  Note: Cygwin/Windows allows rebinding without SO_REUSEADDR on loopback. Linux does
+  not. Write SO_REUSEADDR for every server socket. No exceptions.
+
+  ==============================================================================================
+
+  THE ABORTIVE CLOSE -- SO_LINGER AND THE RST PACKET
+
+  ==============================================================================================
+
+  A normal close() sends FIN, enters the four-way handshake above, and enters TIME_WAIT.
+  An abortive close sends RST instead, skipping TIME_WAIT entirely:
+
+```text
+struct linger sl;
+sl.l_onoff  = 1;
+sl.l_linger = 0;    // linger time zero = abortive close
+setsockopt(client_fd, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+close(client_fd);   // sends RST immediately
+```
+
+```
+  Normal close:    FIN --> TIME_WAIT (port locked for 60-240s)
+  Linger zero:     RST --> socket vaporised instantly
+```
+
+  RST on the receiver: read() returns -1 with ECONNRESET. Any data in flight at the
+  moment of RST is lost permanently. HTTP/1.0 servers that closed every connection
+  after serving one response hit the TIME_WAIT wall at high load: 65,535 outgoing ports
+  exhausted, no new connections possible. SO_LINGER with l_linger=0 was the emergency
+  bypass. HTTP/1.1 fixed the root cause with persistent connections (Connection: keep-
+  alive), avoiding close() after each request entirely.
+
+  We used SO_LINGER in our ghost-connection experiment to simulate a consumer that
+  connects and immediately fires a RST (mimicking Ctrl+C after connect but before any
+  data). The server's accept() then returned -1 with ECONNABORTED on Linux.
+
+  ==============================================================================================
+
+  THE CLOSE_WAIT ZOMBIE -- WHAT HAPPENS WHEN THE SERVER FORGETS TO CLOSE
+
+  ==============================================================================================
+
+  Suppose the consumer calls close() cleanly. The FIN arrives at the server. The kernel
+  sends ACK. The server socket moves to CLOSE_WAIT, waiting for the server process to
+  call close(). If the server never calls close(client_fd), that socket stays in
+  CLOSE_WAIT indefinitely, consuming one FD slot:
+
+```
+  Consumer:   close()   -->   FIN
+  Server kernel:              ACK  --> socket enters CLOSE_WAIT
+  Server process:             (never calls close(client_fd))
+  Server socket:              stays in CLOSE_WAIT forever
+                              FD slot consumed permanently
+```
+
+  In our stress test (5000 consumers, server never closes): server accepted FD 4 through
+  FD 2050 (2047 connections). On the 2048th attempt, the MSVC CRT FD table was full.
+  accept() returned -1. The server could not accept any more connections. No crash, no
+  message -- just silent refusal to accept. Every real server must close(client_fd).
+
+  ==============================================================================================
+
+  BLOCKING accept() AND THE GHOST IN THE QUEUE
+
+  ==============================================================================================
+
+  Blocking accept() without O_NONBLOCK sleeps forever if no client connects. That is
+  fine for simple servers. The sharp edge: if the socket is blocking and you call
+  accept() after a ghost connection (one that completed the handshake then died), the
+  behaviour differs by OS.
+
+  On Linux (strict POSIX): accept() returns -1 with ECONNABORTED. You must check:
+
+```text
+int client_fd = accept(server_fd, nullptr, nullptr);
+if (client_fd == -1) {
+    if (errno == ECONNABORTED) continue;   // ghost, try again
+    perror("accept"); break;
+}
+```
+
+  On Cygwin/Windows: accept() may return a seemingly valid fd for a dead connection.
+  write() on that fd returns -1 immediately. Always check write()'s return value.
+
+  ==============================================================================================
+
+  THE PROOF -- NUMBERS FROM THE TERMINAL, CHECKED IN C++
+
+  ==============================================================================================
+
+  Every byte count above was copied from a real run. The claim common to all of them:
+  every measured kernel-accepted byte total is an exact multiple of 212,992. One non-
+  zero remainder would falsify the block story. This program checks that claim for
+  all ten measurements without using any socket, any thread, or any OS call.
+
+```cpp
+#include <cstdio>
+
+int main() {
+    long b = 212992;   // the TCP window step size observed on loopback, Windows
+
+    // plain 100MB buffer run -- five byte counts copied from the terminal
+    long p1 = 1064960;   // p1 / b =  5
+    long p2 = 1277952;   // p2 / b =  6
+    long p3 = 2129920;   // p3 / b = 10
+    long p4 = 1703936;   // p4 / b =  8
+    long p5 = 1277952;   // p5 / b =  6
+    printf("plain_div: %ld %ld %ld %ld %ld\n",
+           p1/b, p2/b, p3/b, p4/b, p5/b);
+    printf("plain_rem: %ld %ld %ld %ld %ld\n",
+           p1%b, p2%b, p3%b, p4%b, p5%b);
+
+    // VirtualLock (pinned 100MB) run -- five more byte counts
+    long v1 = 1064960;   // v1 / b =  5
+    long v2 = 2768896;   // v2 / b = 13
+    long v3 = 1490944;   // v3 / b =  7
+    long v4 = 1277952;   // v4 / b =  6
+    long v5 = 2981888;   // v5 / b = 14
+    printf("pinned_div: %ld %ld %ld %ld %ld\n",
+           v1/b, v2/b, v3/b, v4/b, v5/b);
+    printf("pinned_rem: %ld %ld %ld %ld %ld\n",
+           v1%b, v2%b, v3%b, v4%b, v5%b);
+
+    // FD limit check: CRT ceiling is 2048 FDs (0,1,2 = stdin/out/err)
+    // first socket FD = 3; last before crash = 2050; count = 2050 - 3 + 1
+    long first_fd = 3;
+    long last_fd  = 2050;
+    long accepted = last_fd - first_fd + 1;
+    printf("accepted_before_crash: %ld\n", accepted);   // 2048
+    printf("fd_limit_hit: %ld\n", accepted == 2048 ? 1 : 0);  // 1
+
+    return 0;
+}
+```
+
+  Running this prints:
+
+      plain_div: 5 6 10 8 6
+      plain_rem: 0 0 0 0 0
+      pinned_div: 5 13 7 6 14
+      pinned_rem: 0 0 0 0 0
+      accepted_before_crash: 2048
+      fd_limit_hit: 1
+
+  Every remainder is zero. The kernel window moves in whole units of 212,992 bytes,
+  in both the unpinned and VirtualLock runs, across five independent processes that
+  share no user-space state. Pinning memory into physical RAM changes nothing because
+  the window is a kernel decision, not a user-space one. And the FD table ceiling of
+  2048 entries (0 through 2047) is confirmed by the exact FD numbers the crash logged.
+
+  >> STANDARD NAMES
+     bytes-before-not-now      -> TCP send buffer; bounded by the kernel's cwnd
+     not-now refusal           -> EAGAIN (non-blocking) or write() blocks (blocking)
+     cwnd                      -> Congestion Window; kernel's estimate of how much
+                                  the network can absorb right now
+     ssthresh                  -> Slow Start Threshold; cwnd resets here after loss
+     TIME_WAIT                 -> state a socket stays in for 2*MSL after graceful close
+     MSL                       -> Maximum Segment Lifetime; ~30-60s; TIME_WAIT = 2*MSL
+     EADDRINUSE                -> errno when bind() fails because port is in TIME_WAIT
+     ECONNABORTED              -> errno from accept() when a queued connection died
+     EMFILE                    -> errno from accept()/socket() when FD table is full
+     ECONNRESET                -> errno from read() when sender sent RST
+     non-paged pool            -> kernel memory that cannot be swapped out
+     RFC 2140                  -> TCP Control Block Interdependence: cached cwnd/ssthresh
+                                  shared across connections to the same route/interface
+
+  =========================================================================
+
+

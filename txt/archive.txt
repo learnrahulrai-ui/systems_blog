@@ -11,6 +11,13 @@
   SPECIALS
   --------
 
+  [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
+    2026-07-15 . special . tcp, kernel, sockets, timewait, rfc-2140
+    The three-way handshake, kernel send/receive buffers, partial reads, TIME_WAIT,
+    SO_LINGER abortive close, ECONNABORTED, FD leaks, and the RFC 2140 loopback cache
+    effect -- every step traced from the real experiments, no hand-waving, with a
+    runnable C++ proof at the end.
+
   [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
     2026-07-15 . tcp, kernel, rfc-2140
 

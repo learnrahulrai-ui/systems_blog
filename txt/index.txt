@@ -14,6 +14,7 @@
   are copied from the terminal, not guessed.
 
   >> START HERE:
+     [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
      [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
 
   [Lesson 1: The Physical Reality of C++ Lambdas](posts/lesson-1-the-physical-reality-of-c-lambdas.txt)
