@@ -1,12 +1,12 @@
-@title Lesson 21: Lesson 21: Incident 006 — "Marketing Broke Our Server" :: Rahul's Systems Blog
+@title Lesson 21: Incident 006 — "Marketing Broke Our Server" :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 21: LESSON 21: INCIDENT 006 — "MARKETING BROKE OUR SERVER"
-  Lesson 21: Lesson 21: Incident 006 — "Marketing Broke Our Server"
+  SPECIAL -- LESSON 21: INCIDENT 006 — "MARKETING BROKE OUR SERVER"
+  Lesson 21: Incident 006 — "Marketing Broke Our Server"
   ============================================================================================
 
 
@@ -14,7 +14,7 @@
   We are officially graduating from **Correctness Bugs** (deadlocks, race conditions, segfaults) to **Performance Bottlenecks**.
 
   --------
-  THE SCENARIO
+  WE RUN THE CODE STANDALONE
   Yesterday, our endpoint was fast and everyone was happy:
 ```text
 Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
@@ -28,7 +28,7 @@ Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
   **The code is 100% technically correct. There are no bugs.**
 
   --------
-  THE INCIDENT
+  INCIDENT
   QA runs a load test on the new feature:
   * 100 users → OK
   * 500 users → OK
@@ -38,7 +38,7 @@ Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
   `Feature → More JSON → More allocations → More copies → Higher CPU → Lower throughput`
 
   --------
-  THE NEXT INVESTIGATION
+  NEXT INVESTIGATION
   We will not open the source code to blindly guess the fix. We will investigate exactly like WinDbg:
   `Customer → URL → Benchmark → CPU → perf → Flamegraph → Source`
 

@@ -1,18 +1,18 @@
-@title Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug) :: Rahul's Systems Blog
+@title Lesson 8: Total Data Loss (The Power Outage Bug) :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 8: LESSON 8: TOTAL DATA LOSS (THE POWER OUTAGE BUG)
-  Lesson 8: Lesson 8: Total Data Loss (The Power Outage Bug)
+  SPECIAL -- LESSON 8: TOTAL DATA LOSS (THE POWER OUTAGE BUG)
+  Lesson 8: Total Data Loss (The Power Outage Bug)
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   Because your lambda only allowed `Logger::processQueue()` to wake up when `stop_` became true, your server was running a "Flush-on-Shutdown" strategy.
 
   To simulate what happens when this carelessness meets reality, I built `experiment/todo4_power_outage_bug.cpp`.
@@ -32,7 +32,7 @@ int main() {
 ```
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   When I ran the experiment, the server accepted 5 critical user transactions. But then the server process suffered a fatal `std::abort()` (Exit Code 1).
 
   Because the program hard-crashed, **`Logger::~Logger()` never executed.**
@@ -46,7 +46,7 @@ int main() {
   **Total data loss.** If this was production, you just lost all record of those 5 purchases, and the customers will be very angry when their items never ship.
 
   --------
-  THE FIX
+  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
   You must write logs to disk the exact millisecond they enter the queue!
 
 ```text

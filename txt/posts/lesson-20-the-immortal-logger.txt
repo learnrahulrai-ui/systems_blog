@@ -1,12 +1,12 @@
-@title Lesson 20: Lesson 20: The Immortal Logger :: Rahul's Systems Blog
+@title Lesson 20: The Immortal Logger :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 20: LESSON 20: THE IMMORTAL LOGGER
-  Lesson 20: Lesson 20: The Immortal Logger
+  SPECIAL -- LESSON 20: THE IMMORTAL LOGGER
+  Lesson 20: The Immortal Logger
   ============================================================================================
 
 
@@ -16,7 +16,7 @@
   I wrote `experiment/todo4_immortal_logger.cpp` to prove it.
 
   --------
-  THE CODE
+  CODE
   I completely deleted `stop_`, deleted the `break` clause, and deleted the destructor. I spawned the thread and **detached** it so it lives independently of the object.
   The background thread became this exact code:
 
@@ -37,7 +37,7 @@ void processQueue() {
 ```
 
   --------
-  THE EXECUTION OUTPUT
+  EXECUTION OUTPUT
   I pushed two logs while the laptop was running. Then, I pushed a final log right before calling `std::exit(0)` to simulate the battery dying instantly.
 
 ```text
@@ -56,7 +56,7 @@ void processQueue() {
   *(Note: Sometimes the final log will print, sometimes the OS will kill the process before the thread wakes up. In this specific run, it managed to squeeze it out, but it is fundamentally a race condition).*
 
   --------
-  THE CONCLUSION
+  CONCLUSION
   Your logic is absolutely airtight.
   If you do not care about a "graceful shutdown", you do not need `stop_` and you do not need a `break` statement. The entire purpose of `stop_` is purely to safely land the airplane without losing data when `main()` decides to close.
 

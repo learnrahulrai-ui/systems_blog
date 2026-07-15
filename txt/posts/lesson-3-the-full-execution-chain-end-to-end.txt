@@ -1,12 +1,12 @@
-@title Lesson 3: Lesson 3: The Full Execution Chain (End-to-End) :: Rahul's Systems Blog
+@title Lesson 3: The Full Execution Chain (End-to-End) :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 3: LESSON 3: THE FULL EXECUTION CHAIN (END-TO-END)
-  Lesson 3: Lesson 3: The Full Execution Chain (End-to-End)
+  SPECIAL -- LESSON 3: THE FULL EXECUTION CHAIN (END-TO-END)
+  Lesson 3: The Full Execution Chain (End-to-End)
   ============================================================================================
 
 
@@ -14,7 +14,7 @@
   We can now map the complete journey of a single integer (the `client_socket`) from the moment the OS accepts the connection, across the thread boundary, and into the `handleClient` function.
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   1. The Main Thread creates the `ThreadPool` at address `0x5000`.
   2. The `ThreadPool` constructor generates the **WorkerLambda**, copies `0x5000` into its backpack, and passes it to `std::thread`.
   3. The Worker Thread spins up and enters `WorkerLambda::operator()`.
@@ -24,7 +24,7 @@
   7. The Main Thread wraps the ServerLambda inside a `std::function` and drops it in the queue.
 
   --------
-  THE EXECUTION STACK
+  EXECUTION STACK
   When the Worker Thread pulls the `std::function` out of the queue and executes it, the call stack transforms dramatically. Each layer is a distinct C++ class invoking the next, and each layer receives its own isolated `this` pointer.
 
   Here is the actual Windows Debugger (`cdb.exe`) stack trace proving this reality:
@@ -54,7 +54,7 @@
 ```
 
   --------
-  THE FINAL REALITY
+  FINAL REALITY
   Look precisely at the types of the `this` pointers:
   1. `class main::__l2::<lambda_73fe...>` (The Worker Lambda)
   2. `class std::_Func_class<void>` (The `std::function` wrapper)

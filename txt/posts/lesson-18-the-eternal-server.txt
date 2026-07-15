@@ -1,12 +1,12 @@
-@title Lesson 18: Lesson 18: The Eternal Server :: Rahul's Systems Blog
+@title Lesson 18: The Eternal Server :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 18: LESSON 18: THE ETERNAL SERVER
-  Lesson 18: Lesson 18: The Eternal Server
+  SPECIAL -- LESSON 18: THE ETERNAL SERVER
+  Lesson 18: The Eternal Server
   ============================================================================================
 
 
@@ -17,7 +17,7 @@
   Let's substitute `stop_ = false` into the logic for all 8 versions to see what code is actually running while the server is alive.
 
   --------
-  THE GOOD NEWS
+  GOOD NEWS
   If we substitute `stop_ = false`, almost all of the `break` clauses evaluate to `if (false) break;`.
   Because they evaluate to false, the thread never dies prematurely.
 
@@ -26,7 +26,7 @@
   This means that during normal, infinite runtime, **6 out of the 8 versions work perfectly.** (V1, V2, V4, V5, V6, V7).
 
   --------
-  THE ONLY RUNTIME BUG: THE MISSING CONSUMER (OOM)
+  ONLY RUNTIME BUG: THE MISSING CONSUMER (OOM)
   The only bug that can kill an eternal server happens in **V3 and V8**.
   These are the versions where you removed `!log_queue_.empty()` from the `cv_.wait` lambda.
 

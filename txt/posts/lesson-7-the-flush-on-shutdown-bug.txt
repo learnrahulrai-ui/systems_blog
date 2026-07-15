@@ -1,18 +1,18 @@
-@title Lesson 7: Lesson 7: The Flush-on-Shutdown Bug :: Rahul's Systems Blog
+@title Lesson 7: The Flush-on-Shutdown Bug :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 7: LESSON 7: THE FLUSH-ON-SHUTDOWN BUG
-  Lesson 7: Lesson 7: The Flush-on-Shutdown Bug
+  SPECIAL -- LESSON 7: THE FLUSH-ON-SHUTDOWN BUG
+  Lesson 7: The Flush-on-Shutdown Bug
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   You implemented **TODO 4**, but you intentionally omitted the check for `!log_queue_.empty()`. You wrote your wait condition like this:
 
 ```text
@@ -23,7 +23,7 @@ cv_.wait(lock, [this]() { return stop_; });
   I created `experiment/todo4_stop_only_bug.cpp` using your exact logic. The Main Thread simulates normal server traffic, pushing logs into the queue and calling `notify_one()` while the server is running.
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   Here is the exact output of your code:
 ```text
 Starting program...
@@ -41,7 +41,7 @@ Program ended successfully.
 ```
 
   --------
-  THE EXPLANATION (WHY YOU FAILED)
+  EXPLANATION (WHY YOU FAILED)
   Your condition variable predicate `return stop_;` essentially tells the Background Thread: *"Never wake up unless the server is literally shutting down."*
 
   Here is the exact mechanical timeline of your failure:
@@ -56,7 +56,7 @@ Program ended successfully.
   7. **Background Thread**: Wakes up, evaluates `return stop_;` (which is now true), and finally starts popping the millions of logs out of the queue all at once!
 
   --------
-  THE FIX
+  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
   You are building an *Asynchronous Logger*, not a *Shutdown Logger*. The Background Thread must wake up if we are stopping **OR** if there is data to process.
 
 ```text

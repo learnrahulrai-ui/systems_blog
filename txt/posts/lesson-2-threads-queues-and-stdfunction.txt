@@ -1,12 +1,12 @@
-@title Lesson 2: Lesson 2: Threads, Queues, and std::function :: Rahul's Systems Blog
+@title Lesson 2: Threads, Queues, and std::function :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 2: LESSON 2: THREADS, QUEUES, AND STD::FUNCTION
-  Lesson 2: Lesson 2: Threads, Queues, and std::function
+  SPECIAL -- LESSON 2: THREADS, QUEUES, AND STD::FUNCTION
+  Lesson 2: Threads, Queues, and std::function
   ============================================================================================
 
 
@@ -25,7 +25,7 @@ std::thread t(worker_lambda);
   No wrapper is needed because `std::thread` is designed to bind tightly to whatever exact callable type you give it at compilation time.
 
   --------
-  THE QUEUE AND POLYMORPHISM
+  QUEUE AND POLYMORPHISM
   However, when you build a ThreadPool queue:
 ```text
 std::queue<std::function<void()>> tasks;
@@ -37,7 +37,7 @@ std::queue<std::function<void()>> tasks;
   This is where `std::function` comes in.
 
   --------
-  THE STD::FUNCTION WRAPPER
+  STD::FUNCTION WRAPPER
   `std::function<void()>` is a polymorphic wrapper. It acts as a universal box that can hold *any* callable object (as long as it takes no arguments and returns `void`).
 
   When the Main Thread enqueues the Server lambda:
@@ -47,7 +47,7 @@ tasks.push([this, socket] { handleClient(socket); });
   The compiler actually constructs the `ServerLambda` object, and then constructs a `std::function` object that takes ownership of it. The `std::function` object is what physically enters the queue.
 
   --------
-  THE WRAPPER'S OPERATOR()
+  WRAPPER'S OPERATOR()
   When the Worker Thread pulls the task from the queue:
 ```text
 std::function<void()> task = tasks.front();

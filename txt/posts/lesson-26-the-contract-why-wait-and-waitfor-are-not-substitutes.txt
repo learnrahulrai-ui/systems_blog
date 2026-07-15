@@ -1,18 +1,18 @@
-@title Lesson 26: Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes :: Rahul's Systems Blog
+@title Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 26: LESSON 26: THE CONTRACT — WHY WAIT AND WAIT_FOR ARE NOT SUBSTITUTES
-  Lesson 26: Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes
+  SPECIAL -- LESSON 26: THE CONTRACT — WHY WAIT AND WAIT_FOR ARE NOT SUBSTITUTES
+  Lesson 26: The Contract — Why wait and wait_for Are Not Substitutes
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
 
   We had a working logger. The consumer loop used:
 
@@ -27,7 +27,7 @@ cv_.wait_for(lock, 5s, pred);
 ```
 
   --------
-  THE CRASH
+  CRASH
 
   After 5 seconds of idle, the program crashed on `front()` of an empty queue.
 
@@ -93,7 +93,7 @@ return true;
   | `false` | `pred() == false` | 5s passed, no work, not stopping — **new path** |
 
   --------
-  THE DISTILLED MODEL ERROR
+  DISTILLED MODEL ERROR
 
   A distilled (compressed) model of `wait_for` looks like:
 
@@ -112,7 +112,7 @@ wait_for = wait WITH a different return contract
   The predicate loop is **inside** the function. When timeout fires, it evaluates `pred()` one final time and returns whatever it returns — without looping back to wait. The caller gets `false` and must handle it.
 
   --------
-  THE TWO KINDS OF "WAKES UP"
+  TWO KINDS OF "WAKES UP"
 
   | Wake reason | `wait` behavior | `wait_for` behavior |
   |------------|----------------|---------------------|
@@ -124,7 +124,7 @@ wait_for = wait WITH a different return contract
   The fourth row doesn't exist for `wait`. It's an entirely new return path that `wait_for` introduces.
 
   --------
-  THE FIX PATTERN
+  FIX PATTERN
 
 ```text
 // wait_for returns false → 5s passed, no work, not stopping
@@ -151,7 +151,7 @@ msg = queue.front();
   `wait_for` is not "`wait` with a timeout." It is a fundamentally different function with a fundamentally different return contract. The timeout is not an addition — it's a restructuring of how and when the function can return.
 
   --------
-  THE EXPERIMENT
+  EXPERIMENT
 
   File: `experiment/test_timeout_periodic_flush.cpp` — correct `wait_for` with the timeout handler.
 

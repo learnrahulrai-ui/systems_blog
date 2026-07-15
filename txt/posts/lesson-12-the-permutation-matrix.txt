@@ -1,12 +1,12 @@
-@title Lesson 12: Lesson 12: The Permutation Matrix :: Rahul's Systems Blog
+@title Lesson 12: The Permutation Matrix :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 12: LESSON 12: THE PERMUTATION MATRIX
-  Lesson 12: Lesson 12: The Permutation Matrix
+  SPECIAL -- LESSON 12: THE PERMUTATION MATRIX
+  Lesson 12: The Permutation Matrix
   ============================================================================================
 
 
@@ -20,7 +20,7 @@ cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 if (stop_ && log_queue_.empty()) break;
 ```
 
-  If you remove **any single variable** from these two lines, the server will suffer a catastrophic failure. Let's step through the debugger trace for all 5 of your permutations.
+  If you remove **any single variable** from these two lines, the server will suffer a catastrophic failure. Let's phase through the debugger trace for all 5 of your permutations.
 
   ---
 

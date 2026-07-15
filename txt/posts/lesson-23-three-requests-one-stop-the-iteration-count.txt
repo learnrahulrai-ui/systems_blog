@@ -1,18 +1,18 @@
-@title Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count :: Rahul's Systems Blog
+@title Lesson 23: Three Requests, One Stop — The Iteration Count :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 23: LESSON 23: THREE REQUESTS, ONE STOP — THE ITERATION COUNT
-  Lesson 23: Lesson 23: Three Requests, One Stop — The Iteration Count
+  SPECIAL -- LESSON 23: THREE REQUESTS, ONE STOP — THE ITERATION COUNT
+  Lesson 23: Three Requests, One Stop — The Iteration Count
   ============================================================================================
 
 
 
   --------
-  THE PATTERN
+  PATTERN
 
   For **N requests + 1 stop**, the while loop runs **N + 1** iterations:
 
@@ -20,7 +20,7 @@
   - **1 final iteration**: detect `stop_ && empty` → `flushPending()` → `break`
 
   --------
-  THE EXPERIMENT
+  EXPERIMENT
 
   File: `experiment/test_three_req_one_stop.cpp`
 
@@ -76,7 +76,7 @@ Request 3: User saved document"
   If you broke on `stop_` alone (without `&& empty`), you'd break at iteration 4 with queue=0 but `pending_` still has 88 bytes unflushed. `if (stop_ && log_queue_.empty())` ensures the buffer is flushed before exiting.
 
   --------
-  THE GENERAL RULE
+  GENERAL RULE
 
 ```text
 iterations = requests + 1

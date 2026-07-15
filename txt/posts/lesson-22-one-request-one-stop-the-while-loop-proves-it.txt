@@ -1,18 +1,18 @@
-@title Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It :: Rahul's Systems Blog
+@title Lesson 22: One Request, One Stop — The While Loop Proves It :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 22: LESSON 22: ONE REQUEST, ONE STOP — THE WHILE LOOP PROVES IT
-  Lesson 22: Lesson 22: One Request, One Stop — The While Loop Proves It
+  SPECIAL -- LESSON 22: ONE REQUEST, ONE STOP — THE WHILE LOOP PROVES IT
+  Lesson 22: One Request, One Stop — The While Loop Proves It
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
 
 ```text
 main()
@@ -25,12 +25,12 @@ main()
 ```
 
   --------
-  THE SCENARIO
+  WE RUN THE CODE STANDALONE
 
   **Exactly one request arrives.** Then someone hits cancel/shutdown. No more requests.
 
   --------
-  STEP-BY-STEP
+  PHASE-BY-PHASE
 
   **1st second — request arrives:**
 
@@ -76,7 +76,7 @@ processQueue() — was sleeping on cv_.wait
   | 2nd | T | Empty | `flushPending()` → **break** |
 
   --------
-  THE EXPERIMENT
+  EXPERIMENT
 
   File: `experiment/test_one_req_one_stop.cpp`
 
@@ -104,7 +104,7 @@ processQueue() — was sleeping on cv_.wait
   4. `flushPending()` runs **twice**: once in the break path, once in `~Logger()` as safety net
 
   --------
-  THE LESSON
+  WE BIND OUR THREADS TO REALITY
 
   **You must enter the while loop twice for one request + one shutdown:**
 

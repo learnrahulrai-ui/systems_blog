@@ -1,18 +1,18 @@
-@title Lesson 6: Lesson 6: The Spurious Wakeup Crash :: Rahul's Systems Blog
+@title Lesson 6: The Spurious Wakeup Crash :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 6: LESSON 6: THE SPURIOUS WAKEUP CRASH
-  Lesson 6: Lesson 6: The Spurious Wakeup Crash
+  SPECIAL -- LESSON 6: THE SPURIOUS WAKEUP CRASH
+  Lesson 6: The Spurious Wakeup Crash
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   A "Spurious Wakeup" is a well-known hardware/OS anomaly where a thread sleeping on a condition variable suddenly wakes up for absolutely no reason, even if `notify_one()` was never called. The POSIX standard and Windows both explicitly warn that `cv.wait()` can return randomly.
 
   To simulate this for **TODO 4**, I created an experiment where the Main Thread intentionally fires a random `notify_one()` while the queue is completely empty:
@@ -35,7 +35,7 @@
 ```
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   When I compiled and ran `experiment/todo4_spurious_wakeup_bug.cpp`, it instantly crashed with a fatal **Exit Code 1** (a C++ STL Debug Assertion Failure / Segmentation Fault).
 
   Here is what the timeline looked like before it died:
@@ -49,13 +49,13 @@ Starting program...
   *Process crashes violently*
 
   --------
-  THE EXPLANATION (WHY TODO 4 IS MANDATORY)
+  EXPLANATION (WHY TODO 4 IS MANDATORY)
   Because we just called `cv_.wait(lock)` blindly, the thread went to sleep. When the OS randomly woke the thread up, the thread proceeded directly to `log_queue_.front()`.
 
   Calling `.front()` or `.pop()` on a `std::queue` that is empty is **Undefined Behavior**. In modern C++, it results in an immediate memory violation (segfault).
 
   --------
-  THE FIX (TODO 4)
+  FIX (TODO 4)
   You must **never** assume that just because a thread woke up, it means there is data for it to process. You must always check the condition yourself inside a `while` loop, or use the built-in lambda predicate of `cv.wait()`:
 
 ```text

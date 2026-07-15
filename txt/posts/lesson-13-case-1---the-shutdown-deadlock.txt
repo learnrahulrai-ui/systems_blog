@@ -1,25 +1,25 @@
-@title Lesson 13: Lesson 13: Case 1 - The Shutdown Deadlock :: Rahul's Systems Blog
+@title Lesson 13: Case 1 - The Shutdown Deadlock :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 13: LESSON 13: CASE 1 - THE SHUTDOWN DEADLOCK
-  Lesson 13: Lesson 13: Case 1 - The Shutdown Deadlock
+  SPECIAL -- LESSON 13: CASE 1 - THE SHUTDOWN DEADLOCK
+  Lesson 13: Case 1 - The Shutdown Deadlock
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   We removed `stop_` from the condition variable lambda, leaving only the queue check:
 ```text
 cv_.wait(lock, [this]() { return !log_queue_.empty(); });
 ```
 
   --------
-  YOUR BRAIN DUMP (THE NORMAL RUNTIME)
+  NORMAL RUNTIME FLOW IN OUR MIND MAP
   Your mental trace of the normal execution was **100% flawless**:
   1. `main()` creates the `Logger`, which passes `this` to spawn a new background thread running `processQueue()`.
   2. A user hits the server. `Logger::log()` gets the lock, pushes to the queue, unlocks, and calls `notify_one()`.
@@ -30,7 +30,7 @@ cv_.wait(lock, [this]() { return !log_queue_.empty(); });
   You concluded: *"i do not see the problem"*
 
   --------
-  THE BLIND SPOT (THE SHUTDOWN SEQUENCE)
+  SHUTDOWN SEQUENCE INTRODUCES A FATAL BLIND SPOT
   Your logic was perfectly sound for a server that runs forever, but you forgot that the program eventually has to close! The bug does not happen when logging; it happens during shutdown when the server is idle.
 
   Let's trace what happens when `main()` decides to shut down:
@@ -41,7 +41,7 @@ cv_.wait(lock, [this]() { return !log_queue_.empty(); });
   4. `~Logger()` then calls `background_writer_.join()`. This means `main()` physically halts and says: *"I will wait right here until the background thread finishes its work and dies."*
 
   --------
-  THE FATAL FLAW
+  FATAL FLAW LURKS IN THE DESTRUCTOR
   5. Down in the background, `processQueue()` hears the `notify_one()` and wakes up!
   6. It evaluates your modified lambda: `[this]() { return !log_queue_.empty(); }`
   7. Because the server is idle, the queue is empty. `!log_queue_.empty()` evaluates to **FALSE**.
@@ -49,7 +49,7 @@ cv_.wait(lock, [this]() { return !log_queue_.empty(); });
   9. The background thread goes permanently back to sleep. It never reaches the `if(stop_) break;` door.
 
   --------
-  THE RESULT: DEADLOCK
+  SYSTEM DROWNS IN A FATAL SHUTDOWN DEADLOCK
   * `main()` is permanently stuck in `.join()`, waiting for the background thread to finish.
   * The background thread is permanently stuck in `.wait()`, sleeping forever because no more logs will ever be pushed to wake it up.
 

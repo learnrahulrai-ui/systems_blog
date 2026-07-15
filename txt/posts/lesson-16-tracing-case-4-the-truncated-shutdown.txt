@@ -1,18 +1,18 @@
-@title Lesson 16: Lesson 16: Tracing Case 4 (The Truncated Shutdown) :: Rahul's Systems Blog
+@title Lesson 16: Tracing Case 4 (The Truncated Shutdown) :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 16: LESSON 16: TRACING CASE 4 (THE TRUNCATED SHUTDOWN)
-  Lesson 16: Lesson 16: Tracing Case 4 (The Truncated Shutdown)
+  SPECIAL -- LESSON 16: TRACING CASE 4 (THE TRUNCATED SHUTDOWN)
+  Lesson 16: Tracing Case 4 (The Truncated Shutdown)
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   We are analyzing Case 4. You removed the queue check from the `if` statement:
 ```text
 while (true) {
@@ -80,7 +80,7 @@ while (true) {
   ---
 
   --------
-  THE VERDICT
+  VERDICT FOR THE RUNTIME STABILITY
   `if (stop_) break;` works perfectly 99% of the time. But the 1% of the time that the server shuts down while it's still processing a backlog of work, it will abruptly quit and destroy customer data.
 
   This is why you **must** add `&& log_queue_.empty()` to the `if` statement. It grabs the thread by the collar and says: *"I don't care if `stop_` is true! You aren't leaving until this queue is completely drained!"*

@@ -1,12 +1,12 @@
-@title Lesson 17: Lesson 17: The Ultimate 80-Test Matrix :: Rahul's Systems Blog
+@title Lesson 17: The Ultimate 80-Test Matrix :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 17: LESSON 17: THE ULTIMATE 80-TEST MATRIX
-  Lesson 17: Lesson 17: The Ultimate 80-Test Matrix
+  SPECIAL -- LESSON 17: THE ULTIMATE 80-TEST MATRIX
+  Lesson 17: The Ultimate 80-Test Matrix
   ============================================================================================
 
 

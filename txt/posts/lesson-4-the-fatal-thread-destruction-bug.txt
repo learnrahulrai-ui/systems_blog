@@ -1,18 +1,18 @@
-@title Lesson 4: Lesson 4: The Fatal Thread Destruction Bug :: Rahul's Systems Blog
+@title Lesson 4: The Fatal Thread Destruction Bug :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 4: LESSON 4: THE FATAL THREAD DESTRUCTION BUG
-  Lesson 4: Lesson 4: The Fatal Thread Destruction Bug
+  SPECIAL -- LESSON 4: THE FATAL THREAD DESTRUCTION BUG
+  Lesson 4: The Fatal Thread Destruction Bug
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   We are using **Bug-Driven Development**. I wrote a standalone experiment `experiment/todo1_shutdown_bug.cpp` that mimics the exact behavior of our `Logger` if you completely ignore **TODO 1** in the destructor.
 
   Here is the exact code I executed:
@@ -49,14 +49,14 @@ int main() {
 ```
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   When I compiled and ran `todo1_shutdown_bug.exe`, the process instantly crashed with a fatal **Exit Code 1** and spawned a Windows C++ Runtime Error dialog box stating:
   `abort() has been called`
 
   The final `std::cout` line in `main()` never executed. The server violently died.
 
   --------
-  THE EXPLANATION (WHY TODO 1 IS MANDATORY)
+  EXPLANATION (WHY TODO 1 IS MANDATORY)
   When the `BadLogger` object goes out of scope, C++ begins destroying its member variables.
   One of those member variables is `std::thread background_writer_`.
 
@@ -66,7 +66,7 @@ int main() {
   Because the background thread was still inside the infinite `while(true)` loop (sleeping on `cv_.wait`), it was still running. When the destructor finished, the `std::thread` object was destroyed, triggering an immediate, unrecoverable crash.
 
   --------
-  THE FIX (TODO 1)
+  FIX (TODO 1)
   To safely destroy a class that owns a thread, you must ensure the thread gracefully exits its function *before* the `std::thread` object is destroyed.
 
   1. **Signal**: You must set a flag (like `stop_ = true`) so the loop knows it's time to quit.

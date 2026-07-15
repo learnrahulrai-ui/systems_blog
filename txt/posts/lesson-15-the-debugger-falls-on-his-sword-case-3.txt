@@ -1,18 +1,18 @@
-@title Lesson 15: Lesson 15: The Debugger Falls on His Sword (Case 3) :: Rahul's Systems Blog
+@title Lesson 15: The Debugger Falls on His Sword (Case 3) :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 15: LESSON 15: THE DEBUGGER FALLS ON HIS SWORD (CASE 3)
-  Lesson 15: Lesson 15: The Debugger Falls on His Sword (Case 3)
+  SPECIAL -- LESSON 15: THE DEBUGGER FALLS ON HIS SWORD (CASE 3)
+  Lesson 15: The Debugger Falls on His Sword (Case 3)
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   We removed `stop_` from the `if` statement:
 ```text
 while (true) {
@@ -28,7 +28,7 @@ while (true) {
 ```
 
   --------
-  YOUR BRAIN DUMP
+  WE RUN THE CODE STANDALONE
   You traced the normal runtime for a single log:
   1. `log("msg")` pushes 1 item and notifies.
   2. Background thread wakes up. The queue is not empty, so the tollbooth is Green!
@@ -39,7 +39,7 @@ while (true) {
   You concluded: *"i do not see the problem of removing stop_ from the if"*
 
   --------
-  THE DEBUGGER'S CONFESSION
+  DEBUGGER CONFESSES THE LIMITATIONS OF SYMBOLS
   In Lesson 12, I told you that removing `stop_` would cause Premature Thread Death. I said it would circle around, hit the empty queue, and instantly commit suicide.
 
   **I WAS WRONG, AND YOU ARE RIGHT.**
@@ -55,7 +55,7 @@ while (true) {
   5. When the queue is finally empty, it hits `if (log_queue_.empty())`, which is now TRUE. It breaks and dies safely.
 
   --------
-  THE VERDICT: YOU OUTSMARTED THE DEBUGGER!
+  VERDICT: WE TRIUMPH OVER THE SYMBOLIC STATE
   Because the `cv_.wait` lambda already guarantees that execution cannot pass the tollbooth unless `(stop_ == true || !log_queue_.empty())`, the **ONLY** physical way the CPU can reach the `if` statement when the queue is empty is if `stop_` is true!
 
   Therefore, checking `stop_ &&` inside the `if` statement is mathematically redundant.

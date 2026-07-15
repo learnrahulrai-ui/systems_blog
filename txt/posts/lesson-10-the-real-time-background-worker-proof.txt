@@ -1,18 +1,18 @@
-@title Lesson 10: Lesson 10: The Real-Time Background Worker Proof :: Rahul's Systems Blog
+@title Lesson 10: The Real-Time Background Worker Proof :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 10: LESSON 10: THE REAL-TIME BACKGROUND WORKER PROOF
-  Lesson 10: Lesson 10: The Real-Time Background Worker Proof
+  SPECIAL -- LESSON 10: THE REAL-TIME BACKGROUND WORKER PROOF
+  Lesson 10: The Real-Time Background Worker Proof
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   You hypothesized that `Logger::processQueue()` only did work when `Logger::~Logger()` (the destructor) was called.
 
   To disprove this, I built `experiment/todo4_realtime_proof.cpp` using the fully fixed, perfect Logger design:
@@ -29,7 +29,7 @@ cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
   6. Finally, let the server shut down (calling the destructor).
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   Here is the exact output of the program. Look at how the execution interleaves!
 
 ```text
@@ -55,7 +55,7 @@ cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 ```
 
   --------
-  THE EXPLANATION
+  WE EXPLAIN THE INTRINSIC KERNEL BEHAVIOR
   Notice what happened when `main()` pushed "Log 1" and went to sleep for a full second.
   While `main()` was completely asleep, `Logger::processQueue()` woke up, pulled the log, and wrote it to disk!
 

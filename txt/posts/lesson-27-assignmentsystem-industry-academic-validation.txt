@@ -1,12 +1,12 @@
-@title Lesson 27: Lesson 27 — AssignmentSystem: Industry & Academic Validation :: Rahul's Systems Blog
+@title Lesson 27: — AssignmentSystem: Industry & Academic Validation :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 27: LESSON 27 — ASSIGNMENTSYSTEM: INDUSTRY & ACADEMIC VALIDATION
-  Lesson 27: Lesson 27 — AssignmentSystem: Industry & Academic Validation
+  SPECIAL -- LESSON 27: — ASSIGNMENTSYSTEM: INDUSTRY & ACADEMIC VALIDATION
+  Lesson 27: — AssignmentSystem: Industry & Academic Validation
   ============================================================================================
 
 
@@ -17,7 +17,7 @@
   A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`.
 
   --------
-  THE 5 FUNCTIONS
+  5 FUNCTIONS
 
   | Function | What It Does | Lines |
   |---|---|---|
@@ -28,7 +28,7 @@
   | `preview(count)` | (Stub) Returns top N agents. | assignment.cpp:90–98 |
 
   --------
-  THE DATA STRUCTURES
+  DATA STRUCTURES
 
 ```text
 std::unordered_map<std::string, Agent> agents_;       // agent name → Agent struct
@@ -40,7 +40,7 @@ int                                    tick_;         // monotonic tiebreaker co
 ```
 
   --------
-  THE AGENT STRUCT
+  AGENT STRUCT
 
 ```text
 struct Agent {
@@ -171,7 +171,7 @@ Release Alice conversation 103:
   ---
 
   --------
-  THE 3 QUEUES IN MINI-SERVER (COMPLETE MAP)
+  3 QUEUES IN MINI-SERVER (COMPLETE MAP)
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐

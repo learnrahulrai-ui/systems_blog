@@ -1,18 +1,18 @@
-@title Lesson 25: Lesson 25: The Periodic Flush — Three Return Paths :: Rahul's Systems Blog
+@title Lesson 25: The Periodic Flush — Three Return Paths :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 25: LESSON 25: THE PERIODIC FLUSH — THREE RETURN PATHS
-  Lesson 25: Lesson 25: The Periodic Flush — Three Return Paths
+  SPECIAL -- LESSON 25: THE PERIODIC FLUSH — THREE RETURN PATHS
+  Lesson 25: The Periodic Flush — Three Return Paths
   ============================================================================================
 
 
 
   --------
-  THE PROBLEM
+  PROBLEM
 
   Without a timeout, partial `pending_` data sits in RAM until the destructor runs:
 
@@ -38,7 +38,7 @@ std::string msg = std::move(log_queue_.front());  // CRASH!
 ```
 
   --------
-  THE THREE RETURN PATHS
+  THREE RETURN PATHS
 
   `cv_.wait(lock, pred)` has **2** return paths:
   | # | Why it returns | pred | Safe? |
@@ -56,7 +56,7 @@ std::string msg = std::move(log_queue_.front());  // CRASH!
   The bug: path #3 is unhandled. `wait_for` returns `false` when the predicate was never satisfied (no work, no stop, just timeout). But the return value is discarded, and the code blindly calls `front()`.
 
   --------
-  THE EXPERIMENT
+  EXPERIMENT
 
   File: `experiment/test_timeout_bug.cpp` — `cv_.wait_for(5s)` with NO empty-check handler.
 
@@ -69,7 +69,7 @@ std::string msg = std::move(log_queue_.front());  // CRASH!
   | 4 req + stop (fast) | drain all, then stop_+empty | ✓ Works |
 
   --------
-  THE FIX
+  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
 
   Add the missing third path handler after the stop check:
 

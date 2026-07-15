@@ -1,12 +1,12 @@
-@title Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof :: Rahul's Systems Blog
+@title Lesson 19: The Out-Of-Memory (OOM) Proof :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 19: LESSON 19: THE OUT-OF-MEMORY (OOM) PROOF
-  Lesson 19: Lesson 19: The Out-Of-Memory (OOM) Proof
+  SPECIAL -- LESSON 19: THE OUT-OF-MEMORY (OOM) PROOF
+  Lesson 19: The Out-Of-Memory (OOM) Proof
   ============================================================================================
 
 
@@ -19,7 +19,7 @@
   Then, I built an "Eternal Server". It boots up, accepts 1,000,000 user requests, and never shuts down.
 
   --------
-  THE EXECUTION OUTPUT
+  EXECUTION OUTPUT
   Here is the exact output straight from the compiler and executable:
 
 ```text
@@ -38,7 +38,7 @@ BUG CONFIRMED: Missing Consumer! Thread never woke up. OOM imminent.
 ```
 
   --------
-  THE CONCLUSION
+  CONCLUSION
   Despite having 2 full seconds of idle CPU time, the Background Thread wrote exactly **0** logs to the disk.
 
   Because `stop_` was false, the thread never woke up.

@@ -1,12 +1,12 @@
-@title Lesson 1: Lesson 1: The Physical Reality of C++ Lambdas :: Rahul's Systems Blog
+@title Lesson 1: The Physical Reality of C++ Lambdas :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 1: LESSON 1: THE PHYSICAL REALITY OF C++ LAMBDAS
-  Lesson 1: Lesson 1: The Physical Reality of C++ Lambdas
+  SPECIAL -- LESSON 1: THE PHYSICAL REALITY OF C++ LAMBDAS
+  Lesson 1: The Physical Reality of C++ Lambdas
   ============================================================================================
 
 
@@ -14,7 +14,7 @@
   C++ lambdas appear to be magic "inline functions," but structurally, they are nothing more than standard C++ classes generated silently by the compiler.
 
   --------
-  THE ILLUSION
+  WHAT LOOKS LIKE MAGIC IS JUST A COMPILER CLASS
   When you write:
 ```text
 class Server {
@@ -30,7 +30,7 @@ class Server {
 ```
 
   --------
-  THE REALITY
+  COMPILER INVENTED A HIDDEN CLASS BEHIND YOUR BACK
   The C++ compiler encounters the `[` `]` capture block and immediately invents a hidden class (often named something like `__ServerLambda_1234`).
 
   The captures `[this, client_socket]` dictate the member variables of this class. The compiler generates:
@@ -59,7 +59,7 @@ __ServerLambda_1234 my_lambda(this, client_socket);
 ```
 
   --------
-  THE THIS POINTER SHIFT
+  THIS POINTER SHIFT
   The most critical realization is understanding what happens to the `this` pointer.
 
   If you are inside `Server::acceptLoop()`, `this` points to the `Server` object.

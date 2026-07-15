@@ -1,18 +1,18 @@
-@title Lesson 5: Lesson 5: The Locked Join Deadlock :: Rahul's Systems Blog
+@title Lesson 5: The Locked Join Deadlock :: Rahul's Systems Blog
 ==============================================================================================
   RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
 ==============================================================================================
   [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
 ----------------------------------------------------------------------------------------------
 
-  SPECIAL -- LESSON 5: LESSON 5: THE LOCKED JOIN DEADLOCK
-  Lesson 5: Lesson 5: The Locked Join Deadlock
+  SPECIAL -- LESSON 5: THE LOCKED JOIN DEADLOCK
+  Lesson 5: The Locked Join Deadlock
   ============================================================================================
 
 
 
   --------
-  THE SETUP
+  WE SETUP THE TEST CASES BY HAND
   You implemented a solution for **TODO 1**, but you left the `join()` call inside the same scope where you locked the mutex:
 
 ```text
@@ -30,7 +30,7 @@
   I wrote an experiment `experiment/todo1_locked_join_bug.cpp` to prove exactly what happens mechanically when you execute this.
 
   --------
-  THE EXECUTION RESULT
+  WE RECORD THE REAL RUNTIME OUTCOME
   When I ran the experiment, the server printed the following lines:
 ```text
 Starting program...
@@ -44,7 +44,7 @@ Starting program...
   And then the program completely froze. It consumed 0% CPU and never aborted. It was a perfect **deadlock**. I had to manually kill the process.
 
   --------
-  THE EXPLANATION (WHY IT DEADLOCKS)
+  EXPLANATION (WHY IT DEADLOCKS)
   A `std::condition_variable` has a very specific awakening sequence. When the Background Thread is sleeping on `cv_.wait()`, it has internally dropped the mutex.
 
   When the Main Thread calls `cv_.notify_one()`, the Background Thread wakes up. **However, before `cv_.wait()` is allowed to return, it MUST re-acquire the mutex.**
@@ -70,7 +70,7 @@ Starting program...
   - Because `join()` never finishes, `~Logger()` never finishes.
 
   --------
-  THE FIX
+  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
   Always drop your locks before yielding or waiting on other threads!
 ```text
 ~BadLogger() {
