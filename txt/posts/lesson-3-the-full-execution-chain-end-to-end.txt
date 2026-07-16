@@ -11,23 +11,30 @@
 
 
 
-  We can now map the complete journey of a single integer (the `client_socket`) from the moment the OS accepts the connection, across the thread boundary, and into the `handleClient` function.
+  Lesson 1 showed a lambda is just an object. Lesson 2 showed function is a box that forwards
+  a call to whatever object it holds. Put both together and trace one real integer,
+  client_socket, from the moment the OS hands it over to the moment handleClient actually
+  runs on a different thread.
 
   --------
-  WE SETUP THE TEST CASES BY HAND
-  1. The Main Thread creates the `ThreadPool` at address `0x5000`.
-  2. The `ThreadPool` constructor generates the **WorkerLambda**, copies `0x5000` into its backpack, and passes it to `std::thread`.
-  3. The Worker Thread spins up and enters `WorkerLambda::operator()`.
-  4. The Main Thread creates the `Server` at address `0x1000`.
-  5. The Main Thread accepts a connection, yielding `client_socket = 42`.
-  6. The Main Thread generates the **ServerLambda**, copies `0x1000` and `42` into its backpack.
-  7. The Main Thread wraps the ServerLambda inside a `std::function` and drops it in the queue.
+  FIRST, THE SETUP, BY ADDRESS
+  1. The main thread creates the ThreadPool at address 0x5000.
+  2. The ThreadPool constructor builds the WorkerLambda, copies 0x5000 into its backpack, and
+     hands it to std::thread.
+  3. The worker thread spins up and enters WorkerLambda::operator().
+  4. The main thread creates the Server at address 0x1000.
+  5. The main thread accepts a connection, yielding client_socket = 42.
+  6. The main thread builds the ServerLambda, copies 0x1000 and 42 into its backpack.
+  7. The main thread wraps the ServerLambda inside a function and drops it in the queue.
 
   --------
-  EXECUTION STACK
-  When the Worker Thread pulls the `std::function` out of the queue and executes it, the call stack transforms dramatically. Each layer is a distinct C++ class invoking the next, and each layer receives its own isolated `this` pointer.
+  THEN THE STACK PROVES IT, FRAME BY FRAME
+  When the worker thread pulls the function out of the queue and calls it, the call stack does
+  not flatten into one function calling another the way it feels like in the source. Each
+  layer is a distinct C++ class invoking the next, and each layer carries its own isolated
+  this pointer.
 
-  Here is the actual Windows Debugger (`cdb.exe`) stack trace proving this reality:
+  Here is the actual Windows debugger (cdb.exe) stack trace proving that:
 
 ```text
 --- FRAME 6: WorkerLambda::operator() ---
@@ -54,14 +61,22 @@
 ```
 
   --------
-  FINAL REALITY
-  Look precisely at the types of the `this` pointers:
-  1. `class main::__l2::<lambda_73fe...>` (The Worker Lambda)
-  2. `class std::_Func_class<void>` (The `std::function` wrapper)
-  3. `class main::__l2::<lambda_a8ad...>` (The Server Lambda)
-  4. `class Server` (The Server)
+  SO LOOK AT WHAT TYPE EACH THIS ACTUALLY IS
+  Read the four this pointers in order:
+  1. class main::__l2::<lambda_73fe...> -- the worker lambda
+  2. class std::_Func_class<void> -- the function wrapper
+  3. class main::__l2::<lambda_a8ad...> -- the server lambda
+  4. class Server -- the server
 
-  Even when the raw numeric memory addresses look similar due to heavily optimized heap allocations and local stack scopes, the C++ type system keeps them separate.
+  The raw numeric addresses look close because of how the heap and the local stack scopes
+  happened to lay out that run, but the C++ type system keeps every one of those four objects
+  separate regardless.
 
-  The Worker Lambda never magically transforms into the Server. It is just an object, calling a wrapper object, calling another object, which finally triggers the server object. This is the mechanical reality of asynchronous C++.
+  The worker lambda never turns into the server. It is one object calling a wrapper object
+  calling another object, which finally reaches the server object -- four real function calls
+  on four real this pointers, not one function magically becoming another.
+
+  >> STANDARD NAMES
+     the call chain proven by cdb   -> WorkerLambda -> std::function -> ServerLambda -> Server
+     each frame's own this          -> the object that frame's operator() belongs to
 

@@ -11,93 +11,90 @@
 
 
 
-  The Asynchronous Logger relies on exactly 4 variables spread across two lines of code to function correctly:
+  Four variables, two lines, and every single one of them is load-bearing. Delete any one
+  variable from either line and the asynchronous logger fails in a different way -- five
+  distinct failures from one pair of lines:
 ```text
-// Line A: The Tollbooth
+// line A: the tollbooth
 cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 
-// Line B: The Exit Door
+// line B: the exit door
 if (stop_ && log_queue_.empty()) break;
 ```
-
-  If you remove **any single variable** from these two lines, the server will suffer a catastrophic failure. Let's phase through the debugger trace for all 5 of your permutations.
-
-  ---
+  Five lessons already covered two of these failures in isolation. Here is the full matrix,
+  side by side.
 
   --------
-  CASE 1: REMOVE STOP_ FROM THE LAMBDA
-  `cv_.wait(lock, [this]() { return !log_queue_.empty(); });`
+  CASE 1: DROP STOP_ FROM THE LAMBDA
+  cv_.wait(lock, [this]() { return !log_queue_.empty(); });
 
-  **The Bug: The Shutdown Deadlock**
+  The bug: the shutdown deadlock.
   1. The server runs fine for 100 days.
-  2. `main()` initiates shutdown. `Logger::~Logger()` sets `stop_ = true` and calls `notify_one()`.
+  2. main() initiates shutdown. The destructor sets stop_ = true and calls notify_one().
   3. The queue is empty.
-  4. The Background Thread wakes up and evaluates `!log_queue_.empty()`. It evaluates to `false`.
-  5. The Background Thread immediately goes back to sleep. It never reaches the `if(stop_) break;` door.
-  6. The Main Thread is permanently stuck in `join()`. **Deadlock.**
-
-  ---
+  4. The background thread wakes and evaluates !log_queue_.empty(). False.
+  5. It goes straight back to sleep. It never reaches the if(stop_) break door.
+  6. The main thread is permanently stuck in join(). Deadlock.
 
   --------
-  CASE 2: REMOVE !LOG_QUEUE_.EMPTY() FROM THE LAMBDA
-  `cv_.wait(lock, [this]() { return stop_; });`
+  CASE 2: DROP !LOG_QUEUE_.EMPTY() FROM THE LAMBDA
+  cv_.wait(lock, [this]() { return stop_; });
 
-  **The Bug: Flush-on-Shutdown / Power Outage Data Loss**
-  (We covered this in Lessons 7 & 8)
+  The bug: flush-on-shutdown, covered in lessons 7 and 8.
   1. The server runs for 100 days.
-  2. The Background Thread refuses to wake up because `stop_` is false.
-  3. The RAM fills up with gigabytes of unwritten logs.
-  4. If the server loses power, all 100 days of logs are instantly destroyed because they were never written to disk.
-
-  ---
+  2. The background thread refuses to wake because stop_ is false.
+  3. RAM fills with gigabytes of unwritten logs.
+  4. A power loss destroys all 100 days of logs, because none of them were ever written to
+     disk.
 
   --------
-  CASE 3: REMOVE STOP_ FROM THE IF STATEMENT
-  `if (log_queue_.empty()) break;`
+  CASE 3: DROP STOP_ FROM THE IF STATEMENT
+  if (log_queue_.empty()) break;
 
-  **The Bug: Premature Thread Death**
-  1. The server boots up. `main()` logs "User logged in".
-  2. The Background Thread wakes up, pops the message, and writes it to disk.
+  The bug: premature thread death.
+  1. The server boots. main() logs "User logged in".
+  2. The background thread wakes, pops the message, writes it to disk.
   3. The queue is now empty.
-  4. The execution moves downward and hits `if (log_queue_.empty()) break;`.
-  5. Because the queue is empty, the thread instantly `break`s and **commits suicide**.
-  6. For the next 100 days of the server's life, there is no Background Thread. All future logs pile up in memory forever.
-
-  ---
-
-  --------
-  CASE 4: REMOVE LOG_QUEUE_.EMPTY() FROM THE IF STATEMENT
-  `if (stop_) break;`
-
-  **The Bug: Truncated Shutdown (Data Loss)**
-  (We covered this in Lesson 11)
-  1. `main()` initiates shutdown while there are still 500 unwritten logs in the queue.
-  2. The Background Thread wakes up. It hits `if (stop_) break;`.
-  3. It instantly breaks and dies.
-  4. The 500 logs are abandoned in memory and destroyed.
-
-  ---
+  4. Execution reaches if (log_queue_.empty()) break.
+  5. The queue is empty, so the thread breaks and exits immediately.
+  6. For the rest of the server's life there is no background thread. Every future log just
+     piles up in memory forever.
 
   --------
-  CASE 5: REMOVE THE ENTIRE IF STATEMENT
-  (No break statement at all)
+  CASE 4: DROP LOG_QUEUE_.EMPTY() FROM THE IF STATEMENT
+  if (stop_) break;
 
-  **The Bug: The "No Exit" Segfault**
-  1. `main()` initiates shutdown.
-  2. `Logger::~Logger()` sets `stop_ = true` and `notify_one()`.
+  The bug: truncated shutdown, covered in lesson 11.
+  1. main() initiates shutdown while 500 logs are still unwritten in the queue.
+  2. The background thread wakes, hits if (stop_) break, and exits instantly.
+  3. The 500 logs are abandoned in memory and destroyed.
+
+  --------
+  CASE 5: DROP THE IF STATEMENT ENTIRELY
+  No break statement at all.
+
+  The bug: the no-exit segfault.
+  1. main() initiates shutdown.
+  2. The destructor sets stop_ = true and calls notify_one().
   3. The queue is empty.
-  4. The Background Thread wakes up. The lambda `return stop_` is true, so it passes the tollbooth!
-  5. Because there is no `break` statement to catch it, it moves downward to the draining logic:
+  4. The background thread wakes. The lambda return stop_ is true, so it passes the tollbooth.
+  5. With no break to catch it, execution falls straight into the draining logic:
 ```text
 std::string msg = log_queue_.front();
 ```
-  6. **BOOM.** Calling `.front()` on an empty queue instantly crashes the server with a Segmentation Fault (Exit Code 1).
-
-  ---
+  6. front() on an empty queue crashes the server immediately with a segmentation fault, exit
+     code 1.
 
   --------
-  CONCLUSION
-  Every single boolean check in those two lines is load-bearing.
-  * The Lambda (`Line A`) controls **WHEN** the thread is allowed to wake up.
-  * The If Statement (`Line B`) controls **WHEN** the thread is allowed to die.
+  SO EVERY CHECK IN THOSE TWO LINES IS DOING REAL WORK
+  Line A, the lambda, controls when the thread is allowed to wake up. Line B, the if
+  statement, controls when the thread is allowed to die. Removing either half of either line
+  does not degrade the logger gracefully -- it produces one specific, reproducible failure
+  mode, five different ways to be wrong from two lines of code.
 
+  >> STANDARD NAMES
+     line A missing stop_               -> shutdown deadlock
+     line A missing the queue check      -> flush-on-shutdown / power-outage loss
+     line B missing stop_                -> premature thread death
+     line B missing the queue check      -> truncated shutdown
+     line B missing entirely             -> no-exit segfault on empty-queue front()

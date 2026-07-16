@@ -10,20 +10,24 @@
   ============================================================================================
 
 
-  Using a standard file for real-time IPC requires the consumer to spin in an infinite loop (`while(true) read()`), which burns 100% CPU (polling). Real IPC needs blocking primitives (like sockets or pipes) that put the thread to sleep until data arrives.
+  A plain file was never built for real-time IPC, and the read side proves it: watching a
+  file for new data means calling read() in a loop, over and over, and a loop that never
+  sleeps is a loop that burns 100% of a CPU core doing nothing.
 
   --------
-  DATAFLOW AND PROCESS CONSTRAINTS
-
+  FIRST, WHAT POLLING COSTS AGAINST WHAT BLOCKING COSTS
 ```text
-Consumer (Polling): [while(true) -> read() -> return -1/0 -> loop immediately] ---> 100% CPU burned!
-Consumer (Blocking): [read() -> no data -> OS puts thread to sleep]            ---> 0% CPU burned!
-                                                   | (data arrives)
-                                           [OS wakes thread up]
+consumer, polling:  while(true) -> read() -> returns -1/0 -> loop again immediately -> 100% CPU
+consumer, blocking: read() -> no data -> OS puts the thread to sleep                -> 0% CPU
+                                            | (data arrives)
+                                    OS wakes the thread up
 ```
+  Real IPC primitives -- sockets, pipes -- can block: the OS itself parks the thread and only
+  wakes it when data actually shows up. A plain file offers no such call. There is no
+  read-and-sleep-until-ready option, only read-and-check-again.
 
   --------
-  WE INSPECT THE TARGET SYSTEM CODE
+  THEN THE ACTUAL CODE THIS RUNS ON
 
 ```text
 #include <stdio.h>
@@ -108,79 +112,23 @@ int main(int argc, char* argv[]) {
 ```
 
   --------
-  WE EXPLAIN THE INTRINSIC KERNEL BEHAVIOR
-
-  [ORIGINAL GIT LOG]
+  SO WHAT THE REAL COMMIT SAYS ABOUT THIS
   commit e83e43aeca8ba561a8bc420fddf6fd5f1b7b9670
-  Author: SysDes Admin <pizza@sysdes.local>
-  Date:   Tue Jul 14 22:10:12 2026 +0530
-
   v3 complete. Logged buffer overflow and CPU polling issues.
 
-
-  [LESSON SYNTHESIS]
-  This file is part of the extensive TCP Window Scaling and Blocking Socket debugging journey.
-  The experiments in these files proved that blocking write() calls are fundamentally flawed.
-  The OS Kernel dictates execution speed by dynamically throttling the TCP Receive Window (cwnd).
-  Crucially, via RFC 2140, the Windows Kernel caches these window metrics on the SUBNET/INTERFACE level.
-  This means unrelated C++ processes on the same Loopback Subnet silently inherit TCP state from each other.
-
-  [EVIDENCE FROM LESSON 10B]
   --------
-  HIDDEN TCP STATE (RFC 2140)
+  SO WHY A FILE FORCES POLLING AND A SOCKET DOESN'T
+  A file descriptor for a socket or a pipe carries a readiness concept the kernel understands
+  and can act on: no data means put this thread to sleep, and wake it the instant data lands.
+  A plain file descriptor carries no such contract -- read() on a file returns immediately
+  whether there is new data or not, because "new data" was never a concept the filesystem was
+  built to signal.
 
-  --------
-  WE MEASURE THE SYSTEM BEHAVIOR DIRECTLY
+  That is why the consumer's only option, checking a plain file, is a while loop calling read()
+  as fast as the CPU can execute it -- 100% of a core spent checking a file that changes maybe
+  once a second. Moving to sockets in v4 replaces that busy loop with a blocking read() that
+  the OS itself controls the wakeup for.
 
-  When benchmarking a server's push capacity across 5 different, brand-new processes connecting to 5 **different** IP addresses (`127.0.0.1` through `127.0.0.5`), the bytes successfully pushed into the non-blocking socket did not reset. Instead, they scaled geometrically:
-
-```text
-Run 1 (127.0.0.1): 1,064,960 bytes
-Run 2 (127.0.0.2): 1,277,952 bytes (Base + 1 unit)
-Run 3 (127.0.0.3): 2,129,920 bytes (Base + 5 units)
-Run 4 (127.0.0.4): 1,703,936 bytes (Base + 3 units)
-Run 5 (127.0.0.5): 1,277,952 bytes (Base + 1 unit)
-```
-
-  Even when rewriting the experiment to use zero threads, zero shared variables, and zero loops (a completely flat script), the results remained identical.
-
-  --------
-  VIRTUALLOCK PROOF OF MEMORY LOCKING
-  To definitively prove that user-space memory allocation has no effect on the TCP window, we rewrote the C++ program to use `VirtualAlloc` and `VirtualLock`, forcing the OS to lock the 100MB user-space buffer into physical, non-pageable RAM.
-
-  The Kernel ignored the user-space memory architecture completely and applied the exact same temporal route caching heuristics, jumping across strict mathematical "gears" based on a `212,992`-byte interval:
-
-```text
-Run 1 (127.0.0.1): 1,064,960 bytes (Baseline)
-Run 2 (127.0.0.2): 2,768,896 bytes (+ 8x 212,992)
-Run 3 (127.0.0.3): 1,490,944 bytes (+ 2x 212,992)
-Run 4 (127.0.0.4): 1,277,952 bytes (+ 1x 212,992)
-Run 5 (127.0.0.5): 2,981,888 bytes (+ 9x 212,992)
-```
-
-  --------
-  WHAT CHANGED IN OUR RUNTIME ENVIRONMENT
-
-  Nothing in the user-space code changed. The operating system kernel intervened.
-
-  --------
-  ROOT CAUSE: RFC 2140 AND INTERFACE ROUTE CACHING
-
-  When a C++ program calls `write()` or `send()`, the program does not touch the network. It passes a buffer to the OS Kernel (the `tcpip.sys` driver on Windows), which copies the data into the **Non-Paged Pool**.
-
-  The OS Kernel is a persistent, global entity. It tracks the speed and health of its physical (and virtual) network interfaces to optimize throughput.
-
-  According to **RFC 2140 (TCP Control Block Interdependence)**, modern OS networking stacks deliberately cache TCP Congestion Window (`cwnd`) and Slow Start Threshold (`ssthresh`) metrics. Crucially, Windows caches these metrics against the **Subnet Route** or **Network Interface**, not just the individual IP.
-
-  Because `127.0.0.1`, `127.0.0.2`, and `127.0.0.3` all belong to the `127.0.0.0/8` subnet, they all route through the exact same Virtual Loopback Interface.
-
-  When Run 1 measured zero loss and sub-millisecond ACKs on the loopback interface, the global Kernel updated its heuristic cache for the entire interface. When Run 2 (a brand new C++ process) connected to `127.0.0.2`, the Kernel instantly applied the "warmed up" metrics from Run 1, granting it a massive TCP window. When the consumer application slept for 13 seconds (proving to be a "slow reader"), the Kernel punished the interface, mathematically shrinking the window back down by Runs 4 and 5 to prevent buffer bloat.
-
-  --------
-  WE BIND OUR THREADS TO REALITY
-
-  Your C++ program is entirely at the mercy of global Kernel heuristics. Relying on blocking sockets or implicit kernel buffering makes your application's performance unpredictable, as it will inherit the network state left behind by entirely unrelated processes.
-
-  Asynchronous, non-blocking I/O (`poll`, `epoll`, `IOCP`) is the only way to decouple your thread execution from the Kernel's unpredictable TCP scaling algorithms.
-
-  =========================================================================
+  >> STANDARD NAMES
+     a loop that never sleeps, checking repeatedly -> polling
+     the OS parking a thread until data is ready    -> blocking

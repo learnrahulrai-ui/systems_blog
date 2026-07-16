@@ -11,50 +11,63 @@
 
 
 
-  If lambdas are just custom classes, how do standard library components like `std::thread` and `std::queue` store and execute them?
+  Every lambda is its own unique, compiler-invented class -- lesson 1 showed that. So here is
+  the next problem: a queue holds one fixed element type, and two lambdas are never the same
+  type. How does a whole thread pool of different lambdas end up sitting in the same queue?
 
   --------
-  STD::THREAD EATS RAW OBJECTS
-  When you create a worker thread with a lambda:
+  A THREAD CAN EAT A RAW OBJECT DIRECTLY
+  When you hand a lambda straight to a thread:
 ```text
 auto worker_lambda = [this] { while(true) { /* ... */ } };
 std::thread t(worker_lambda);
 ```
-  `std::thread` is a template. It happily accepts your raw `WorkerLambda` object, copies or moves it into its internal thread state, and when the OS spins up the thread, it calls `worker_lambda.operator()()`.
-
-  No wrapper is needed because `std::thread` is designed to bind tightly to whatever exact callable type you give it at compilation time.
+  thread is a template. It accepts the exact, raw WorkerLambda object, copies or moves it into
+  its own internal state, and when the OS spins the thread up, it calls
+  worker_lambda.operator()(). No wrapper needed -- the template locks onto whatever concrete
+  type you handed it at compile time.
 
   --------
-  QUEUE AND POLYMORPHISM
-  However, when you build a ThreadPool queue:
+  BUT A QUEUE CANNOT BE A TEMPLATE FOR EVERY LAMBDA AT ONCE
+  A ThreadPool queue looks like this:
 ```text
 std::queue<std::function<void()>> tasks;
 ```
-  A queue cannot be a generic template for *every possible lambda type*. A queue is a fixed data structure that expects elements of a fixed size and type.
-
-  Since every lambda is a completely unique, compiler-generated class (e.g., `__WorkerLambda_1` vs `__ServerLambda_2`), they cannot be stored in the same queue directly.
-
-  This is where `std::function` comes in.
+  A queue is not a template that adapts per element -- it is a fixed data structure expecting
+  one fixed size and type. Every lambda is a distinct compiler-generated class (WorkerLambda_1
+  is not the same type as ServerLambda_2), so raw lambdas cannot sit in the same queue
+  together. Something has to flatten every lambda down to one common type first.
 
   --------
-  STD::FUNCTION WRAPPER
-  `std::function<void()>` is a polymorphic wrapper. It acts as a universal box that can hold *any* callable object (as long as it takes no arguments and returns `void`).
+  SO THE STANDARD LIBRARY BUILDS A UNIVERSAL BOX
+  function<void()> is a polymorphic wrapper: a box that can hold any callable object, as long
+  as it takes no arguments and returns void.
 
-  When the Main Thread enqueues the Server lambda:
+  When the main thread enqueues the server's lambda:
 ```text
 tasks.push([this, socket] { handleClient(socket); });
 ```
-  The compiler actually constructs the `ServerLambda` object, and then constructs a `std::function` object that takes ownership of it. The `std::function` object is what enters the queue.
+  the compiler builds the ServerLambda object first, then builds a function object that takes
+  ownership of it. It is that function object, one fixed type no matter which lambda is
+  inside, that actually enters the queue.
 
   --------
-  WRAPPER'S OPERATOR()
-  When the Worker Thread pulls the task from the queue:
+  AND THE BOX FORWARDS THE CALL, IT DOES NOT KNOW WHAT IT HOLDS
+  When the worker thread pulls the task back out:
 ```text
 std::function<void()> task = tasks.front();
 task();
 ```
-  Because `task` is an object of type `std::function`, the CPU enters `std::function::operator()`.
-  Inside this function, the standard library looks at the object it is holding (the `ServerLambda`), and dynamically calls its `operator()`.
+  task is an object of type function, so the CPU enters function::operator(). Inside that
+  call, the standard library looks at whatever object it is holding -- here, the ServerLambda
+  -- and dynamically calls that object's own operator().
 
-  **Key Takeaway**: `std::function` is a box with a button (`operator()`). When you press the button on the box, the box presses the button on whatever object is inside it.
+  function is a box with a button, operator(). Pressing the button on the box presses the
+  button on whatever object happens to be sitting inside it -- which is the only reason a
+  queue of one fixed type can carry a thread pool's worth of different lambdas.
+
+  >> STANDARD NAMES
+     the universal callable wrapper -> std::function
+     the button every callable has  -> operator()
+     lambda flattened to one type   -> type erasure
 

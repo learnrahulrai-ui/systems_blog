@@ -10,21 +10,22 @@
   ============================================================================================
 
 
-  When `write(100MB)` returns `638,976`, it DOES NOT mean the consumer received that data. It only means the local OS Kernel *accepted* 638KB into its Send Buffer. If the consumer suddenly aborts (RST), that data is permanently lost mid-flight, even though `write()` reported it as "written".
+  write(100MB) returns 638,976. Read that number as "638,976 bytes reached the consumer" and
+  the program is already wrong -- it means the local kernel accepted 638,976 bytes into its
+  own send buffer. Nothing about that number says the data left the machine, let alone arrived.
 
   --------
-  DATAFLOW AND PROCESS CONSTRAINTS
-
+  FIRST, WHAT THE RETURN VALUE ACTUALLY PROMISES
 ```text
-write(100MB) ---> returns 638,976 (bytes accepted into local OS Kernel Send Buffer)
+write(100MB) ---> returns 638,976 (bytes accepted into the local kernel's send buffer)
                            |
-              Does NOT mean consumer received it!
+              does NOT mean the consumer received them
                            |
-       If consumer aborts, data in flight is vaporized!
+       if the consumer aborts now, whatever was still in flight is gone
 ```
 
   --------
-  WE INSPECT THE TARGET SYSTEM CODE
+  THEN THE ACTUAL CODE THIS RUNS ON
 
 ```text
 #include <stdio.h>
@@ -105,79 +106,26 @@ int main(int argc, char* argv[]) {
 ```
 
   --------
-  WE EXPLAIN THE INTRINSIC KERNEL BEHAVIOR
-
-  [ORIGINAL GIT LOG]
-  commit 7e50f725b648a22b293864c960453642094d4c29
-  Author: SysDes Admin <pizza@sysdes.local>
-  Date:   Wed Jul 15 15:26:18 2026 +0530
-
-  Add TCP Windows Auto-Tuner multi-IP cache experiments, race condition fix, chat export script, chatv1 reconstruction, and Silly Window Syndrome demo
-
-
-  [LESSON SYNTHESIS]
-  This file is part of the extensive TCP Window Scaling and Blocking Socket debugging journey.
-  The experiments in these files proved that blocking write() calls are fundamentally flawed.
-  The OS Kernel dictates execution speed by dynamically throttling the TCP Receive Window (cwnd).
-  Crucially, via RFC 2140, the Windows Kernel caches these window metrics on the SUBNET/INTERFACE level.
-  This means unrelated C++ processes on the same Loopback Subnet silently inherit TCP state from each other.
-
-  [EVIDENCE FROM LESSON 10B]
-  --------
-  HIDDEN TCP STATE (RFC 2140)
+  SO WHAT THE REAL COMMIT SAYS ABOUT THIS
+  commit 7e50f725b648a22b293864c960453642094d4c29: TCP window auto-tuner multi-IP cache
+  experiments, a race condition fix, and a Silly Window Syndrome demo, all from the same
+  session that produced this test's random 100MB payload and the deliberately-unclosed
+  consumer socket above.
 
   --------
-  WE MEASURE THE SYSTEM BEHAVIOR DIRECTLY
+  SO write()'S RETURN VALUE ENDS AT THE LOCAL KERNEL, NOT THE PEER
+  write() is a syscall into this machine's own kernel. Its return value reports what that
+  local kernel accepted into its own send buffer -- a promise about local memory, not about
+  the network, and definitely not about the process on the other end. Everything after that
+  point -- the data actually crossing the wire, the peer's kernel receiving it, the peer's
+  application reading it -- happens on a timeline write() has already returned from and knows
+  nothing about.
 
-  When benchmarking a server's push capacity across 5 different, brand-new processes connecting to 5 **different** IP addresses (`127.0.0.1` through `127.0.0.5`), the bytes successfully pushed into the non-blocking socket did not reset. Instead, they scaled geometrically:
+  If the consumer aborts with an RST while bytes are still between the two kernels, those
+  bytes are gone, permanently, even though write() already reported them as "written". The
+  only way to know data truly arrived is a reply from the other side -- an application-level
+  acknowledgment -- not the return value of the call that sent it.
 
-```text
-Run 1 (127.0.0.1): 1,064,960 bytes
-Run 2 (127.0.0.2): 1,277,952 bytes (Base + 1 unit)
-Run 3 (127.0.0.3): 2,129,920 bytes (Base + 5 units)
-Run 4 (127.0.0.4): 1,703,936 bytes (Base + 3 units)
-Run 5 (127.0.0.5): 1,277,952 bytes (Base + 1 unit)
-```
-
-  Even when rewriting the experiment to use zero threads, zero shared variables, and zero loops (a completely flat script), the results remained identical.
-
-  --------
-  VIRTUALLOCK PROOF OF MEMORY LOCKING
-  To definitively prove that user-space memory allocation has no effect on the TCP window, we rewrote the C++ program to use `VirtualAlloc` and `VirtualLock`, forcing the OS to lock the 100MB user-space buffer into physical, non-pageable RAM.
-
-  The Kernel ignored the user-space memory architecture completely and applied the exact same temporal route caching heuristics, jumping across strict mathematical "gears" based on a `212,992`-byte interval:
-
-```text
-Run 1 (127.0.0.1): 1,064,960 bytes (Baseline)
-Run 2 (127.0.0.2): 2,768,896 bytes (+ 8x 212,992)
-Run 3 (127.0.0.3): 1,490,944 bytes (+ 2x 212,992)
-Run 4 (127.0.0.4): 1,277,952 bytes (+ 1x 212,992)
-Run 5 (127.0.0.5): 2,981,888 bytes (+ 9x 212,992)
-```
-
-  --------
-  WHAT CHANGED IN OUR RUNTIME ENVIRONMENT
-
-  Nothing in the user-space code changed. The operating system kernel intervened.
-
-  --------
-  ROOT CAUSE: RFC 2140 AND INTERFACE ROUTE CACHING
-
-  When a C++ program calls `write()` or `send()`, the program does not touch the network. It passes a buffer to the OS Kernel (the `tcpip.sys` driver on Windows), which copies the data into the **Non-Paged Pool**.
-
-  The OS Kernel is a persistent, global entity. It tracks the speed and health of its physical (and virtual) network interfaces to optimize throughput.
-
-  According to **RFC 2140 (TCP Control Block Interdependence)**, modern OS networking stacks deliberately cache TCP Congestion Window (`cwnd`) and Slow Start Threshold (`ssthresh`) metrics. Crucially, Windows caches these metrics against the **Subnet Route** or **Network Interface**, not just the individual IP.
-
-  Because `127.0.0.1`, `127.0.0.2`, and `127.0.0.3` all belong to the `127.0.0.0/8` subnet, they all route through the exact same Virtual Loopback Interface.
-
-  When Run 1 measured zero loss and sub-millisecond ACKs on the loopback interface, the global Kernel updated its heuristic cache for the entire interface. When Run 2 (a brand new C++ process) connected to `127.0.0.2`, the Kernel instantly applied the "warmed up" metrics from Run 1, granting it a massive TCP window. When the consumer application slept for 13 seconds (proving to be a "slow reader"), the Kernel punished the interface, mathematically shrinking the window back down by Runs 4 and 5 to prevent buffer bloat.
-
-  --------
-  WE BIND OUR THREADS TO REALITY
-
-  Your C++ program is entirely at the mercy of global Kernel heuristics. Relying on blocking sockets or implicit kernel buffering makes your application's performance unpredictable, as it will inherit the network state left behind by entirely unrelated processes.
-
-  Asynchronous, non-blocking I/O (`poll`, `epoll`, `IOCP`) is the only way to decouple your thread execution from the Kernel's unpredictable TCP scaling algorithms.
-
-  =========================================================================
+  >> STANDARD NAMES
+     what write()'s return value actually confirms -> accepted into the local send buffer
+     data between two kernels when a peer aborts     -> lost in flight, regardless of write()'s return

@@ -11,22 +11,21 @@
 
 
 
-  You theorized that if a program never shuts down (or if you simply do not care about data loss when the laptop crashes), you do not need `stop_` or a `break` clause at all.
+  Push the eternal-server idea to its limit: if a program never shuts down, or you simply
+  accept that data can be lost on a hard crash, does the logger need stop_ or a break clause
+  at all?
 
-  I wrote `experiment/todo4_immortal_logger.cpp` to prove it.
-
-  --------
-  CODE
-  I completely deleted `stop_`, deleted the `break` clause, and deleted the destructor. I spawned the thread and **detached** it so it lives independently of the object.
-  The background thread became this exact code:
+  experiment/todo4_immortal_logger.cpp deletes stop_, deletes the break clause, deletes the
+  destructor, and spawns the thread detached so it lives independently of the object entirely.
+  The background thread reduces to this:
 
 ```text
 void processQueue() {
     while (true) {
         std::unique_lock<std::mutex> lock(mtx_);
-        
-        cv_.wait(lock, [this]() { return !log_queue_.empty(); }); // Tollbooth
-        
+
+        cv_.wait(lock, [this]() { return !log_queue_.empty(); });
+
         std::string msg = log_queue_.front();
         log_queue_.pop();
         lock.unlock();
@@ -37,8 +36,9 @@ void processQueue() {
 ```
 
   --------
-  EXECUTION OUTPUT
-  I pushed two logs while the laptop was running. Then, I pushed a final log right before calling `std::exit(0)` to simulate the battery dying instantly.
+  THEN THE RUN
+  Two logs pushed while the laptop is running, then one final log pushed right before calling
+  std::exit(0) to simulate the battery dying instantly.
 
 ```text
 [main] Booting up laptop...
@@ -53,10 +53,18 @@ void processQueue() {
 [Immortal Thread] Wrote to disk: User saved a very important document
 ```
 
-  *(Note: Sometimes the final log will print, sometimes the OS will kill the process before the thread wakes up. In this specific run, it managed to squeeze it out, but it is fundamentally a race condition).*
+  Sometimes the final log prints, sometimes the OS kills the process before the thread wakes
+  up to write it -- this specific run squeezed it out, but that outcome is fundamentally a
+  race, not a guarantee.
 
   --------
-  CONCLUSION
-  Your logic is absolutely airtight.
-  If you do not care about a "graceful shutdown", you do not need `stop_` and you do not need a `break` statement. The entire purpose of `stop_` is purely to safely land the airplane without losing data when `main()` decides to close.
+  SO STOP_ TURNS OUT TO SOLVE EXACTLY ONE PROBLEM
+  Without a graceful-shutdown requirement, neither stop_ nor a break statement is needed at
+  all -- the logger keeps working correctly forever. The entire purpose of stop_ is to land the
+  shutdown safely, without losing data, when main() actually decides to close. Remove the
+  requirement for a clean landing, and the mechanism built to provide it becomes unnecessary.
+
+  >> STANDARD NAMES
+     a thread outliving the object that spawned it -> detached thread
+     no clean-exit guarantee on process kill        -> a race, not a guarantee
 

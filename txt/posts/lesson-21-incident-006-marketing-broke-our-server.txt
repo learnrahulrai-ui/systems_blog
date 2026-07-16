@@ -11,11 +11,13 @@
 
 
 
-  We are officially graduating from **Correctness Bugs** (deadlocks, race conditions, segfaults) to **Performance Bottlenecks**.
+  Every lesson so far has been a correctness bug: a deadlock, a segfault, a race condition --
+  something that is simply wrong. This one is different. Nothing here is wrong. The code is
+  100% correct, and the server still falls over.
 
   --------
-  WE RUN THE CODE STANDALONE
-  Yesterday, our endpoint answered in 2 ms and everyone was happy:
+  FIRST, WHAT CHANGED, WHICH IS NOTHING ABOUT THE LOGIC
+  Yesterday, this endpoint answered in 2 ms and everyone was happy:
 ```text
 Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
 ```
@@ -23,26 +25,28 @@ Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
 { "message": "hello" }
 ```
 
-  Today, Marketing requested "richer data". Nobody changed the algorithms, the thread pool, or the logger. Another engineer simply updated the endpoint to return 30 KB of realistic JSON containing users, posts, comments, and followers.
-
-  **The code is 100% technically correct. There are no bugs.**
-
-  --------
-  INCIDENT
-  QA runs a load test on the new feature:
-  * 100 users → OK
-  * 500 users → OK
-  * 1000 users → Latency increases, CPU hits 100%, Requests/sec drops off a cliff.
-
-  **The Reality:** The new feature is correct. The system is now too slow.
-  `Feature → More JSON → More allocations → More copies → Higher CPU → Lower throughput`
+  Today, marketing asked for richer data. Nobody touched the algorithms, the thread pool, or
+  the logger. One engineer changed the endpoint to return 30 KB of realistic JSON: users,
+  posts, comments, followers. That is the entire diff.
 
   --------
-  NEXT INVESTIGATION
-  We will not open the source code to blindly guess the fix. We will investigate exactly like WinDbg:
-  `Customer → URL → Benchmark → CPU → perf → Flamegraph → Source`
+  THEN THE LOAD TEST, WHICH IS WHERE IT ACTUALLY BREAKS
+  QA runs a load test on the new endpoint:
+  100 users -- fine.
+  500 users -- fine.
+  1000 users -- latency climbs, CPU hits 100%, requests per second falls off a cliff.
 
-  We need to map the **Complete Request Lifecycle** and answer the question: *Where exactly did the CPU spend its time?*
+  The new feature is correct. The system underneath it is now too slow to carry it:
+  feature -> more JSON -> more allocations -> more copies -> higher CPU -> lower throughput.
+
+  --------
+  SO THE INVESTIGATION HAS TO START FROM EVIDENCE, NOT A GUESS
+  Opening the source and guessing at a fix is not the plan. The investigation runs the same way
+  a debugger trace does: customer -> URL -> benchmark -> CPU -> profiler -> flamegraph ->
+  source.
+
+  That means mapping the complete request lifecycle and asking, at every single stage: where
+  exactly did the CPU spend its time?
 ```text
 Alice
   ↓
@@ -66,7 +70,12 @@ Browser
   ↓
 Alice
 ```
-  At each box, we must ask: *Did we spend 0 μs, 10 μs, 1 ms, or 20 ms?*
+  At each box, the question is the same: did this stage cost 0 microseconds, 10 microseconds,
+  1 millisecond, or 20 milliseconds? Answering that, stage by stage, is what the next lessons
+  do -- serialization, copies, memory allocation, cache locality, throughput, latency, and
+  flamegraphs, with no database involved anywhere in the chain.
 
-  This lesson introduces serialization, copies, memory allocation, cache locality, throughput, latency, and flamegraphs—without ever needing a database.
+  >> STANDARD NAMES
+     code that works but the system can't carry -> a performance bottleneck, not a bug
+     tracing where CPU time actually goes         -> the request lifecycle / flamegraph method
 

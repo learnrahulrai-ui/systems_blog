@@ -11,26 +11,19 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  You hypothesized that `Logger::processQueue()` only did work when `Logger::~Logger()` (the destructor) was called.
+  Lessons 7 and 8 fixed the predicate. Here is the claim that fix was supposed to make true:
+  that processQueue does its work in real time, while main is off doing something else
+  entirely, not only at the very end when the destructor runs.
 
-  To disprove this, I built `experiment/todo4_realtime_proof.cpp` using the fully fixed, perfect Logger design:
+  experiment/todo4_realtime_proof.cpp uses the fully fixed predicate:
 ```text
 cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 ```
-
-  In `main()`, I did the following:
-  1. Initialize the Logger.
-  2. Push "Log 1".
-  3. **Sleep for 1 full second** (simulating the server running and doing other things).
-  4. Push "Log 2".
-  5. **Sleep for 1 full second**.
-  6. Finally, let the server shut down (calling the destructor).
+  and runs this sequence in main: push "Log 1", sleep a full second, push "Log 2", sleep a
+  full second, then let the destructor run.
 
   --------
-  WE RECORD THE REAL RUNTIME OUTCOME
-  Here is the exact output of the program. Look at how the execution interleaves!
+  THEN THE RUN, WATCH HOW IT INTERLEAVES
 
 ```text
 [main] Program started.
@@ -55,13 +48,19 @@ cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 ```
 
   --------
-  WE EXPLAIN THE INTRINSIC KERNEL BEHAVIOR
-  Notice what happened when `main()` pushed "Log 1" and went to sleep for a full second.
-  While `main()` was completely asleep, `Logger::processQueue()` woke up, pulled the log, and wrote it to disk!
+  SO THE WORK HAPPENS WHILE MAIN IS ASLEEP, NOT AT THE END
+  Look at what happens right after main pushes "Log 1" and goes to sleep for a full second.
+  While main is completely asleep, processQueue wakes up on its own, pulls the log, and writes
+  it to disk -- long before the destructor is ever called.
 
-  It did this **long before** the destructor was ever called.
+  The thread spawned by the constructor runs fully in parallel with main. With the predicate
+  checking the queue, it wakes the instant a log is pushed, writes it, and goes back to sleep,
+  keeping RAM empty and the log already safe on disk.
 
-  The `std::thread` spawned by the constructor runs entirely in parallel with `main()`. Because we fixed the `cv_.wait()` predicate to check the queue, it wakes up the exact millisecond a log is pushed, processes it, and goes right back to sleep, keeping the RAM empty and the logs safely on the hard drive.
+  The destructor turns out to be nothing more than the last knock on the door: we are shutting
+  down now, you can go home. All the real work already happened while main was asleep.
 
-  The destructor is truly just a polite knock on the door at the very end of the server's life saying: *"We are shutting down now, you can go home."*
+  >> STANDARD NAMES
+     work done as data arrives, not at exit -> real-time background processing
+     the destructor's actual remaining job  -> stop the loop and join, not flush a backlog
 

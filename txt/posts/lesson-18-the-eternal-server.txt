@@ -11,51 +11,59 @@
 
 
 
-  You asked a brilliant question: *"Servers do not shut down. What happens if we ignore shutdown entirely and just look at the bugs that happen while the server runs indefinitely?"*
+  Real servers do not shut down -- they run for months. So a fair question: strip shutdown out
+  of the picture entirely, and ask which of the eight permutations from lesson 17 are actually
+  broken while the server just keeps running.
 
-  Let's do the math. If the server never shuts down, then `stop_` is **forever FALSE**.
-  Let's substitute `stop_ = false` into the logic for all 8 versions to see what code is actually running while the server is alive.
-
-  --------
-  GOOD NEWS
-  If we substitute `stop_ = false`, almost all of the `break` clauses evaluate to `if (false) break;`.
-  Because they evaluate to false, the thread never dies prematurely.
-
-  Furthermore, because of the mathematical Tollbooth rule you discovered in Lesson 15, `cv_.wait()` forces the thread to sleep when the queue is empty, completely protecting the `.front()` call from crashing.
-
-  This means that during normal, infinite runtime, **6 out of the 8 versions work perfectly.** (V1, V2, V4, V5, V6, V7).
+  If the server never shuts down, stop_ is forever false. Substitute stop_ = false into the
+  logic for all 8 versions and see what is actually left running while the server is alive.
 
   --------
-  ONLY RUNTIME BUG: THE MISSING CONSUMER (OOM)
-  The only bug that can kill an eternal server happens in **V3 and V8**.
-  These are the versions where you removed `!log_queue_.empty()` from the `cv_.wait` lambda.
+  MOST VERSIONS TURN OUT FINE UNDER THAT SUBSTITUTION
+  With stop_ = false substituted in, almost every break clause reduces to if (false) break --
+  it can never fire, so the thread never dies prematurely.
 
-  Let's substitute `stop_ = false` into V3 and V8's Tollbooth:
+  And because of the redundancy proven in lesson 15, cv_.wait already forces the thread to
+  sleep whenever the queue is empty, which protects the front() call from ever running on an
+  empty queue regardless of what the break condition says.
+
+  That means during normal, infinite runtime, 6 of the 8 versions work correctly: V1, V2, V4,
+  V5, V6, V7.
+
+  --------
+  BUT ONE BUG SURVIVES EVEN WITH SHUTDOWN REMOVED ENTIRELY
+  The one failure that can still kill an eternal server lives in V3 and V8 -- the versions
+  missing !log_queue_.empty() from the wait lambda.
+
+  Substitute stop_ = false into that lambda directly:
 ```text
-// Original: 
+// original
 cv_.wait(lock, [this]() { return stop_; });
 
-// Substituted for Eternal Runtime:
+// with stop_ = false substituted for eternal runtime
 cv_.wait(lock, [this]() { return false; });
 ```
+  The predicate is now unconditionally false, forever. Trace it:
+  1. The server boots. The background thread hits the wait.
+  2. The lambda returns false.
+  3. The thread goes to sleep.
+  4. A user visits the site. main() pushes "Log 1" to the queue and calls notify_one().
+  5. The background thread wakes, evaluates the lambda: still false.
+  6. It goes right back to sleep.
 
-  **The Fatal Trace:**
-  1. The server boots up. The background thread hits the Tollbooth.
-  2. The lambda returns `false`.
-  3. The background thread says: *"Red light. I will go to sleep."*
-  4. A user visits the website. `main()` pushes "Log 1" to the queue and calls `notify_one()`.
-  5. The background thread wakes up. The lambda returns `false`.
-  6. The background thread says: *"Still a Red light. I will go back to sleep."*
-
-  **The Consequence:**
-  For the next 100 days, the background thread **never wakes up**. It is functionally dead.
-  Every time a user visits the website, `main()` pushes a string into the `std::queue`.
-  Because nothing is popping those strings, the queue grows infinitely in RAM. 1 Megabyte... 1 Gigabyte... 30 Gigabytes...
-
-  Eventually, the Operating System realizes your server has consumed 100% of the server's memory. The OS invokes the **OOM Killer** (Out-Of-Memory Killer), which aggressively terminates your web server with an out-of-memory exception.
+  For the next 100 days, the background thread never wakes up again. It is functionally dead.
+  Every visit pushes another string into the queue, and because nothing is ever popping them,
+  the queue grows without bound in RAM -- 1 megabyte, 1 gigabyte, 30 gigabytes. Eventually the
+  operating system's out-of-memory killer terminates the process outright.
 
   --------
-  SUMMARY
-  If a server never shuts down, the only thing that matters is the Tollbooth checking the queue (`!log_queue_.empty()`).
-  If you remove that check, the consumer effectively ceases to exist, and your server will eventually explode from memory bloat.
+  SO FOR AN ETERNAL SERVER, ONE CHECK IS THE ONLY ONE THAT MATTERS
+  If a server never shuts down, everything about the break condition is moot -- it can never
+  fire either way. The only line doing real work is the wait predicate checking the queue,
+  !log_queue_.empty(). Remove that one check and the consumer thread effectively stops
+  existing, and the server eventually dies of memory exhaustion instead of a clean crash.
+
+  >> STANDARD NAMES
+     queue growing without bound in RAM -> unbounded memory growth
+     the OS terminating it for that     -> OOM killer
 

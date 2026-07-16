@@ -11,90 +11,88 @@
 
 
 
+  Every lesson so far assumed the destructor eventually runs to flush whatever is left in
+  pending_. What if the server just stays up for hours, with nothing ever quite reaching the
+  4KB flush threshold?
+
   --------
-  PROBLEM
-
-  Without a timeout, partial `pending_` data sits in RAM until the destructor runs:
-
+  FIRST, THE PROBLEM WITH NO TIMEOUT AT ALL
 ```text
-3 requests processed → pending_ = 78 bytes (< 4KB, not flushed)
-Server idle for hours → consumer sleeps at cv_.wait
+3 requests processed -> pending_ = 78 bytes (< 4KB, not flushed)
+Server idle for hours -> consumer sleeps at cv_.wait
 78 bytes sit in RAM
-CRASH at 3AM → 78 bytes GONE
+CRASH at 3AM -> 78 bytes GONE
 ```
 
   --------
-  NAIVE FIX: JUST ADD WAIT_FOR
-
+  THE NAIVE FIX ADDS A TIMEOUT AND NOTHING ELSE
 ```text
-// BUGGY — only changed wait → wait_for, nothing else
+// buggy -- only changed wait to wait_for, nothing else
 cv_.wait_for(lock, std::chrono::seconds(5),
              [this]() { return stop_ || !log_queue_.empty(); });
 
 if (stop_ && log_queue_.empty()) { flushPending(); break; }
 
-// FALLS THROUGH HERE ON TIMEOUT
-std::string msg = std::move(log_queue_.front());  // CRASH!
+// falls through here on timeout
+std::string msg = std::move(log_queue_.front());  // crash
 ```
 
   --------
-  THREE RETURN PATHS
+  SO WHY DOES A TIMEOUT BREAK CODE THAT WORKED BEFORE
+  cv_.wait(lock, pred) only has 2 ways to return:
+      #   why it returns          pred    safe?
+      1   notify_one, work arrived  true    yes -- queue has items
+      2   notify_one, stop          true    yes -- stop_ && empty catches it
 
-  `cv_.wait(lock, pred)` has **2** return paths:
-  | # | Why it returns | pred | Safe? |
-  |---|---------------|------|-------|
-  | 1 | `notify_one` (work arrived) | true | Yes — queue has items |
-  | 2 | `notify_one` (stop) | true | Yes — `stop_&&empty` catches it |
+  cv_.wait_for(lock, 5s, pred) has 3:
+      #   why it returns          pred    safe?
+      1   notify_one, work arrived  true    yes -- queue has items
+      2   notify_one, stop          true    yes -- stop_ && empty catches it
+      3   the 5-second timeout      false   no -- falls to front() on an empty queue, crash
 
-  `cv_.wait_for(lock, 5s, pred)` has **3** return paths:
-  | # | Why it returns | pred | Safe? |
-  |---|---------------|------|-------|
-  | 1 | `notify_one` (work arrived) | true | Yes — queue has items |
-  | 2 | `notify_one` (stop) | true | Yes — `stop_&&empty` catches it |
-  | 3 | **5s timeout** | **false** | **NO** — falls to `front()` on empty queue → **CRASH** |
-
-  The bug: path #3 is unhandled. `wait_for` returns `false` when the predicate was never satisfied (no work, no stop, just timeout). But the return value is discarded, and the code blindly calls `front()`.
-
-  --------
-  EXPERIMENT
-
-  File: `experiment/test_timeout_bug.cpp` — `cv_.wait_for(5s)` with NO empty-check handler.
-
-  | Case | What happens | Result |
-  |------|-------------|--------|
-  | 1 req + stop (within 5s) | notify wakes, stop_+empty detected | ✓ Works |
-  | 0 req + stop | stop_ true immediately | ✓ Works |
-  | 3 req + stop (within 5s) | drain all, then stop_+empty | ✓ Works |
-  | **4 req, NO stop** | **drain all, enter wait_for, 5s → timeout → front() on EMPTY** | **✗ CRASH** |
-  | 4 req + stop (within 5s) | drain all, then stop_+empty | ✓ Works |
+  Path 3 is the one nobody handled. wait_for returns false when the predicate was never
+  satisfied at all -- no work arrived, nobody signaled stop, the wait just timed out. The
+  return value carrying that information is discarded, and the code below blindly calls
+  front() anyway.
 
   --------
-  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
+  THEN THE RUN, ACROSS FIVE CASES
+  experiment/test_timeout_bug.cpp, cv_.wait_for(5s) with no empty-check handler:
+      case                              what happens                                    result
+      1 req + stop (within 5s)         notify wakes, stop_+empty detected               works
+      0 req + stop                     stop_ true immediately                           works
+      3 req + stop (within 5s)         drain all, then stop_+empty                       works
+      4 req, no stop                   drain all, enter wait_for, 5s timeout, front()
+                                        on an EMPTY queue                                crash
+      4 req + stop (within 5s)         drain all, then stop_+empty                       works
 
-  Add the missing third path handler after the stop check:
-
+  --------
+  SO THE FIX ADDS THE MISSING THIRD PATH EXPLICITLY
 ```text
 cv_.wait_for(lock, std::chrono::seconds(5),
              [this]() { return stop_ || !log_queue_.empty(); });
 
-// Path 2: stop
+// path 2: stop
 if (stop_ && log_queue_.empty()) { flushPending(); break; }
 
-// Path 3: timeout (empty queue, no stop)
+// path 3: timeout, empty queue, no stop
 if (log_queue_.empty()) {
     lock.unlock();
-    flushPending();    // ← flush partial pending_ periodically
-    continue;          // ← go back to waiting
+    flushPending();    // flush whatever partial pending_ is holding
+    continue;           // go back to waiting
 }
 
-// Path 1: normal work
+// path 1: normal work
 std::string msg = std::move(log_queue_.front());
 ```
-
-  This also solves the original "partial pending_ sits in RAM" problem: every 5 seconds the buffer is flushed regardless of size.
+  This also solves the original problem from the top of the post: every 5 seconds, whatever is
+  sitting in pending_ gets flushed regardless of whether it ever reached 4KB.
 
   --------
-  KEY INSIGHT
+  SO WAIT_FOR NEEDS A THIRD BRANCH THAT WAIT NEVER DID
+  wait_for can return false -- a timeout with no work and no stop signal -- and the code has to
+  handle all three paths that opens up, not just the two that plain wait ever produced.
 
-  `wait_for` needs an `if (empty())` guard because the return value of `wait_for` can be **false** (timeout with no work). The code must handle all three paths, not just the two that `wait` has.
-
+  >> STANDARD NAMES
+     wait_for returning false        -> the timeout path (path 3)
+     flush on a timer, not just size -> the periodic-flush fix

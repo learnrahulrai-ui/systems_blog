@@ -11,34 +11,22 @@
 
 
 
-  --------
-  WE RUN THE CODE STANDALONE
-
-  Server starts. Someone presses stop **before any request arrives**.
-
-  No log calls. No queue items. No pending buffer. Just a clean shutdown.
+  Iterations = requests + 1 held at N=1 and N=3. Push it to the edge: N=0. Server starts,
+  someone hits stop before a single request arrives -- no log calls, no queue items, no
+  pending buffer, just a clean shutdown with nothing to do. Does the formula still hold, and
+  does the loop crash reaching for something that was never there?
 
   --------
-  QUESTION
-
-  Will the while loop crash or behave correctly when there's nothing to do?
-
-  --------
-  EXPERIMENT
-
-  File: `experiment/test_stop_no_log.cpp`
-
-  --------
-  TRACE
-
+  THEN THE TRACE
+  experiment/test_stop_no_log.cpp:
 ```text
 [main] Server started. No requests yet.
 [main] Someone presses stop immediately!
 
 [~Logger] stop_=true, notify_one
 
-[processQueue] Iteration 1 — stop_=1 queue_size=0 pending_size=0
-[processQueue] stop && empty → nothing to flush (correct!)
+[processQueue] Iteration 1 -- stop_=1 queue_size=0 pending_size=0
+[processQueue] stop && empty -> nothing to flush (correct!)
 [flushPending] Nothing to flush (correct!)
 [processQueue] Exited loop after 1 iterations
 
@@ -47,29 +35,31 @@
 ```
 
   --------
-  WHILE LOOP ITERATION COUNT
+  SO THE FORMULA HOLDS DOWN TO ZERO
+      requests (N)   iterations   formula
+      0              1            N + 1 = 1
+      1              2            N + 1 = 2
+      3              4            N + 1 = 4
 
-  | N (requests) | Iterations | Formula |
-  |-------------|-----------|---------|
-  | 0 | 1 | N + 1 = 1 |
-  | 1 | 2 | N + 1 = 2 |
-  | 3 | 4 | N + 1 = 4 |
-
-  **General rule:** `iterations = requests + 1`
-
-  The "+1" is always the final iteration where `stop_ && empty` is detected and the pending buffer is flushed (or skipped if empty).
+  The "+1" is always that same final iteration: the one where stop_ && empty() is detected and
+  the pending buffer gets flushed -- or, at N=0, skipped, because there was nothing in it.
 
   --------
-  WHY 1 ITERATION FOR 0 REQUESTS
-
+  SO WHY DOES ZERO REQUESTS STILL COST ONE ITERATION
 ```text
 cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 ```
-
-  When `stop_=true` is set and queue is empty, the predicate `stop_` is **true**. The wait returns immediately. The check `if (stop_ && log_queue_.empty())` fires, `flushPending()` does nothing (nothing to flush), and `break` exits.
+  stop_ is set true with the queue already empty. The predicate stop_ is already true, so wait
+  returns immediately without ever needing a queue item to satisfy it. The check
+  if (stop_ && log_queue_.empty()) then fires on that very first pass, flushPending finds
+  nothing to write, and break exits the loop -- one iteration, no special-casing required.
 
   --------
-  WE BIND OUR THREADS TO REALITY
+  SO THE ZERO CASE NEEDS NO SEPARATE CODE PATH
+  The same if (stop_ && empty()) guard that protects the ordinary shutdown path handles zero
+  requests for free. Nothing about N=0 required a new branch -- it just walked through the
+  existing one.
 
-  The code handles zero requests cleanly. No special case needed. The same `if (stop_ && empty())` guard that protects the shutdown path also handles the "nothing happened" case.
-
+  >> STANDARD NAMES
+     shutdown with nothing ever queued -> the zero case, N=0
+     iterations for N requests + stop  -> N + 1 (confirmed N=0, N=1, N=3)

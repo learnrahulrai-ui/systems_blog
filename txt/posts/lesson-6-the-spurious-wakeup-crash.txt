@@ -11,23 +11,26 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  A "Spurious Wakeup" is a well-known hardware/OS anomaly where a thread sleeping on a condition variable suddenly wakes up for absolutely no reason, even if `notify_one()` was never called. The POSIX standard and Windows both explicitly warn that `cv.wait()` can return randomly.
+  A thread goes to sleep on a condition variable, nobody calls notify, and it wakes up anyway.
+  Not a bug in your code -- both POSIX and Windows document this outright: wait can return for
+  no reason at all. A "spurious wakeup." Here is what happens if the code trusts that waking
+  up means there is work to do.
 
-  To simulate this for **TODO 4**, I created an experiment where the Main Thread intentionally fires a random `notify_one()` while the queue is completely empty:
+  --------
+  FIRST, FORCE ONE ON PURPOSE
+  An experiment fires a random notify_one while the queue is completely empty, on code that
+  assumes waking up means data arrived:
 
 ```text
     void processQueue() {
         while (true) {
             std::unique_lock<std::mutex> lock(mtx_);
-            
-            // INTENTIONALLY MISSING TODO 4!
-            // We just wait blindly. No while-loop, no lambda predicate.
-            cv_.wait(lock); 
-            
-            // We wake up and blindly assume there is data in the queue!
-            std::string msg = log_queue_.front(); // FATAL CRASH
+
+            // waits blindly: no while-loop, no predicate
+            cv_.wait(lock);
+
+            // wakes up and assumes there must be data
+            std::string msg = log_queue_.front(); // fatal
             log_queue_.pop();
             // ...
         }
@@ -35,10 +38,11 @@
 ```
 
   --------
-  WE RECORD THE REAL RUNTIME OUTCOME
-  When I compiled and ran `experiment/todo4_spurious_wakeup_bug.cpp`, it instantly crashed with a fatal **Exit Code 1** (a C++ STL Debug Assertion Failure / Segmentation Fault).
+  THEN THE RUN, NOT A PREDICTION
+  experiment/todo4_spurious_wakeup_bug.cpp crashes instantly with exit code 1: a C++ STL debug
+  assertion failure, a segmentation fault.
 
-  Here is what the timeline looked like before it died:
+  Here is the timeline right before it dies:
 ```text
 Starting program...
 [Background Thread] Sleeping blindly...
@@ -46,17 +50,22 @@ Starting program...
 [Background Thread] I am awake!
 [Background Thread] I am awake, so there must be data! Reading queue.front()...
 ```
-  *Process crashes violently*
+  Process crashes.
 
   --------
-  EXPLANATION (WHY TODO 4 IS MANDATORY)
-  Because we just called `cv_.wait(lock)` blindly, the thread went to sleep. When the OS randomly woke the thread up, the thread proceeded directly to `log_queue_.front()`.
+  SO WHY DOES WAKING UP ALONE CRASH IT
+  Because cv_.wait(lock) was called with no predicate, the thread just slept. When the OS
+  woke it for no reason, it proceeded straight to log_queue_.front() -- no check, no question
+  asked about whether there was actually anything there.
 
-  Calling `.front()` or `.pop()` on a `std::queue` that is empty is **Undefined Behavior**. In modern C++, it results in an immediate memory violation (segfault).
+  Calling front or pop on an empty queue is undefined behavior. In practice, that is an
+  immediate memory violation.
 
   --------
-  FIX (TODO 4)
-  You must **never** assume that just because a thread woke up, it means there is data for it to process. You must always check the condition yourself inside a `while` loop, or use the built-in lambda predicate of `cv.wait()`:
+  SO WAKING UP CAN NEVER BE TRUSTED ON ITS OWN
+  A thread waking up must never be treated as proof there is work to do. The condition has to
+  be checked directly, either inside a while loop or through wait's own built-in predicate
+  form:
 
 ```text
 // This is exactly what the lambda does internally:
@@ -69,11 +78,18 @@ cv_.wait(lock, [this]() {
 });
 ```
 
-  By providing this lambda (the predicate), the condition variable becomes immune to spurious wakeups.
-  1. The OS wakes the thread up randomly.
-  2. The condition variable evaluates the lambda.
-  3. The lambda says "False! We are not stopping, and the queue is still empty!"
-  4. The condition variable immediately puts the thread back to sleep.
+  With that predicate in place, a spurious wakeup can no longer reach front or pop:
+  1. The OS wakes the thread up for no reason.
+  2. wait evaluates the lambda.
+  3. The lambda returns false: not stopping, queue still empty.
+  4. wait immediately puts the thread back to sleep, on its own, without the code doing
+     anything.
 
-  It will only allow the thread to proceed to line 80 if there is *actually* data in the queue, or if we are shutting down!
+  The thread is only allowed past wait if there really is data in the queue, or the server is
+  actually shutting down.
+
+  >> STANDARD NAMES
+     waking with no notify behind it   -> spurious wakeup
+     checking the real condition first -> the predicate form of cv.wait()
+     reading/popping an empty queue    -> undefined behavior
 

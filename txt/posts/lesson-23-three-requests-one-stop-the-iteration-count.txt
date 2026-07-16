@@ -11,76 +11,62 @@
 
 
 
-  --------
-  PATTERN
-
-  For **N requests + 1 stop**, the while loop runs **N + 1** iterations:
-
-  - **N iterations**: pop each message and add to `pending_`
-  - **1 final iteration**: detect `stop_ && empty` → `flushPending()` → `break`
+  Lesson 22 found 2 iterations for 1 request. Push it to 3 requests and see whether the
+  pattern is really N + 1, or whether 1 request was a special case.
 
   --------
-  EXPERIMENT
-
-  File: `experiment/test_three_req_one_stop.cpp`
-
-  --------
-  TRACE
-
+  FIRST, THE TRACE FOR THREE REQUESTS
+  experiment/test_three_req_one_stop.cpp:
 ```text
 [main] Request 1 arrives
-[processQueue] Iteration 1 — stop_=0 queue_size=1 pending_size=0
+[processQueue] Iteration 1 -- stop_=0 queue_size=1 pending_size=0
 [processQueue] Popped "Request 1: User logged in" pending_ now 26 bytes
 
 [main] Request 2 arrives
-[processQueue] Iteration 2 — stop_=0 queue_size=1 pending_size=26
+[processQueue] Iteration 2 -- stop_=0 queue_size=1 pending_size=26
 [processQueue] Popped "Request 2: User clicked button" pending_ now 57 bytes
 
 [main] Request 3 arrives
-[processQueue] Iteration 3 — stop_=0 queue_size=1 pending_size=57
+[processQueue] Iteration 3 -- stop_=0 queue_size=1 pending_size=57
 [processQueue] Popped "Request 3: User saved document" pending_ now 88 bytes
 
 [main] Shutdown signal received
 [~Logger] stop_=true, notify_one
 
-[processQueue] Iteration 4 — stop_=1 queue_size=0 pending_size=88
-[processQueue] stop && empty → flushing pending_ and breaking
+[processQueue] Iteration 4 -- stop_=1 queue_size=0 pending_size=88
+[processQueue] stop && empty -> flushing pending_ and breaking
 [flushPending] Writing to disk: all 3 requests batched together
 
 [main] PASS: Exactly 3 logs written
 ```
 
   --------
-  KEY OBSERVATION
-
-  The 3 log messages are **batched** into `pending_` and flushed as one write:
-
+  SO THE THREE MESSAGES LAND IN ONE WRITE, NOT THREE
+  The 3 log messages accumulate in pending_ and hit disk as a single write:
 ```text
 "Request 1: User logged in
 Request 2: User clicked button
 Request 3: User saved document"
 ```
-
-  This is the batch-write optimization — 3 log lines, 1 `fprintf` call.
-
-  --------
-  WHY THE WHILE LOOP MUST ITERATE N+1 TIMES
-
-  | Iteration | stop_ | queue | Action |
-  |-----------|-------|-------|--------|
-  | 1 | F | 1 | Pop msg → `pending_` → loop |
-  | 2 | F | 1 | Pop msg → `pending_` → loop |
-  | 3 | F | 1 | Pop msg → `pending_` → loop |
-  | 4 | **T** | **0** | **flushPending() → break** |
-
-  If you broke on `stop_` alone (without `&& empty`), you'd break at iteration 4 with queue=0 but `pending_` still has 88 bytes unflushed. `if (stop_ && log_queue_.empty())` ensures the buffer is flushed before exiting.
+  Three log lines, one fprintf call -- the batch-write optimization pending_ exists for.
 
   --------
-  GENERAL RULE
+  SO THE LOOP TURNS N + 1 TIMES, CONFIRMED AT N=3
+      iteration   stop_   queue   action
+      1           F       1       pop msg -> pending_ -> loop
+      2           F       1       pop msg -> pending_ -> loop
+      3           F       1       pop msg -> pending_ -> loop
+      4           T       0       flushPending() -> break
 
-```text
-iterations = requests + 1
-```
+  If the break condition were stop_ alone, without && empty(), iteration 4 would break with
+  the queue already at 0 but pending_ still holding 88 unflushed bytes. The && empty() half of
+  the condition is what forces that flush to happen before the thread is allowed to exit.
 
-  Each request takes one iteration to pop. The final iteration detects the empty queue after shutdown and flushes the accumulated buffer.
+  --------
+  SO THE GENERAL RULE IS ITERATIONS = REQUESTS + 1
+  Each request costs exactly one iteration to pop. The final, extra iteration is the one that
+  detects the drained, stopping state and flushes whatever pending_ was still holding.
 
+  >> STANDARD NAMES
+     N log lines flushed together      -> batch-write (one fprintf, not N)
+     turns of the loop for N requests  -> N + 1 iterations

@@ -11,9 +11,8 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  We removed `stop_` from the `if` statement:
+  Case 3 from the permutation matrix: stop_ is dropped from the exit check, leaving only the
+  queue check.
 ```text
 while (true) {
     std::unique_lock<std::mutex> lock(mtx_);
@@ -28,40 +27,45 @@ while (true) {
 ```
 
   --------
-  WE RUN THE CODE STANDALONE
-  You traced the normal runtime for a single log:
-  1. `log("msg")` pushes 1 item and notifies.
-  2. Background thread wakes up. The queue is not empty, so the tollbooth is Green!
-  3. It hits `if (log_queue_.empty())`. Since there is 1 item, this is FALSE.
-  4. It pops, unlocks, writes to disk.
-  5. It circles back around.
+  FIRST, TRACE ONE SINGLE LOG THROUGH THE NORMAL PATH
+  1. log("msg") pushes 1 item and notifies.
+  2. The background thread wakes up. The queue is not empty, so the wait predicate passes.
+  3. It reaches if (log_queue_.empty()). One item is there, so this is false.
+  4. It pops, unlocks, writes to disk, circles back around.
 
-  You concluded: *"i do not see the problem of removing stop_ from the if"*
+  Traced this far, dropping stop_ from the if does not look like it breaks anything.
 
   --------
-  DEBUGGER CONFESSES THE LIMITATIONS OF SYMBOLS
-  In Lesson 12, I told you that removing `stop_` would cause Premature Thread Death. I said it would circle around, hit the empty queue, and instantly commit suicide.
+  SO WHAT DOES LESSON 12 GET WRONG ABOUT THIS CASE
+  Lesson 12 predicted removing stop_ here would cause premature thread death -- circle around,
+  hit the empty queue, and commit suicide before shutdown ever arrives. That prediction is
+  wrong, and the trace above already shows why: the while(true) loop has a wait check at the
+  very top, before the if is ever reached. When the loop circles back around with the queue
+  now empty and stop_ still false, cv_.wait forces the thread to sleep right there. It never
+  reaches the if statement at all.
 
-  **I WAS WRONG, AND YOU ARE RIGHT.**
-
-  I completely forgot that the `while(true)` loop has a Tollbooth at the very top!
-  When the loop circles around, it hits `cv_.wait()` **FIRST**. Because the queue is now empty and `stop_` is false, `cv_.wait()` forces the thread to go to sleep. It never reaches the `if` statement!
-
-  Let's trace the only other scenario: Shutdown.
-  1. `main()` initiates shutdown. `stop_ = true`.
-  2. The thread wakes up. The Tollbooth is Green because `stop_` is true.
-  3. The thread drops down to `if (log_queue_.empty()) break;`.
-  4. If the queue is full, it skips the break, pops an item, circles around, gets a Green Light again, and repeats.
-  5. When the queue is finally empty, it hits `if (log_queue_.empty())`, which is now TRUE. It breaks and dies safely.
+  So trace the only path that actually matters: shutdown.
+  1. main() initiates shutdown. stop_ = true.
+  2. The thread wakes. The wait predicate passes, because stop_ is true.
+  3. Execution reaches if (log_queue_.empty()) break.
+  4. If the queue still has items, this skips the break, pops one, circles around, passes the
+     wait predicate again (stop_ is still true), and repeats.
+  5. When the queue is finally empty, the if is true, and the thread breaks and exits cleanly.
 
   --------
-  VERDICT: WE TRIUMPH OVER THE SYMBOLIC STATE
-  Because the `cv_.wait` lambda already guarantees that execution cannot pass the tollbooth unless `(stop_ == true || !log_queue_.empty())`, the **ONLY** physical way the CPU can reach the `if` statement when the queue is empty is if `stop_` is true!
-
-  Therefore, checking `stop_ &&` inside the `if` statement is mathematically redundant.
+  SO THE STOP_ CHECK IN THE IF IS PROVABLY REDUNDANT
+  The wait predicate already guarantees execution cannot get past it unless stop_ is true or
+  the queue is non-empty. That means the only way the CPU can ever reach the if statement while
+  the queue is empty is if stop_ is already true. Checking stop_ again inside the if adds
+  nothing that is not already guaranteed one line above it.
 
 ```text
-if (log_queue_.empty()) break; 
+if (log_queue_.empty()) break;
 ```
-  This is a perfectly valid, 100% bug-free replacement. Your logic was completely bulletproof.
+  This is a valid, bug-free replacement -- confirmed by the full test matrix in lesson 17,
+  where this exact version matches the perfect pattern on all 10 runs.
+
+  >> STANDARD NAMES
+     the wait predicate guaranteeing this -> stop_ || !log_queue_.empty() at the loop top
+     the check this makes unnecessary     -> stop_ inside the exit if statement
 

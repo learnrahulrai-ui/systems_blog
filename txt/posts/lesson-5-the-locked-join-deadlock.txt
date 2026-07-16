@@ -11,9 +11,9 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  You implemented a solution for **TODO 1**, but you left the `join()` call inside the same scope where you locked the mutex:
+  Fix one crash and get a worse failure in return: not a crash this time, a program that never
+  ends, consuming 0% CPU, forever. The fix from lesson 4 is in place, but the join call sits
+  inside the same scope as a locked mutex.
 
 ```text
 ~BadLogger() {
@@ -22,16 +22,17 @@
     cv_.notify_one();
     
     if (background_writer_.joinable()) {
-        background_writer_.join(); // YOU ARE STILL HOLDING THE LOCK!
+        background_writer_.join(); // still holding the lock here
     }
-} // Lock drops here
+} // lock drops only now
 ```
 
-  I wrote an experiment `experiment/todo1_locked_join_bug.cpp` to prove exactly what happens mechanically when you execute this.
+  experiment/todo1_locked_join_bug.cpp isolates exactly what happens mechanically when this
+  runs.
 
   --------
-  WE RECORD THE REAL RUNTIME OUTCOME
-  When I ran the experiment, the server printed the following lines:
+  THE RUN FREEZES, IT DOES NOT CRASH
+  Running the experiment prints these lines and then stops:
 ```text
 Starting program...
 [Background Thread] Started, waiting for work...
@@ -41,37 +42,42 @@ Starting program...
 [Main Thread] Calling cv_.notify_one()
 [Main Thread] Calling background_writer_.join() while STILL holding the lock... (DEADLOCK!)
 ```
-  And then the program completely froze. It consumed 0% CPU and never aborted. It was a perfect **deadlock**. I had to manually kill the process.
+  The program does not abort. It consumes 0% CPU and never returns. A deadlock, not a crash --
+  the process has to be killed by hand.
 
   --------
-  EXPLANATION (WHY IT DEADLOCKS)
-  A `std::condition_variable` has a very specific awakening sequence. When the Background Thread is sleeping on `cv_.wait()`, it has internally dropped the mutex.
+  SO WHY DOES NOTIFYING THE THREAD NOT WAKE IT
+  A condition variable has a specific wakeup sequence. While the background thread sleeps on
+  cv_.wait, it has internally dropped the mutex -- that is the whole point of wait, so the
+  main thread can get the lock to make its change.
 
-  When the Main Thread calls `cv_.notify_one()`, the Background Thread wakes up. **However, before `cv_.wait()` is allowed to return, it MUST re-acquire the mutex.**
+  When the main thread calls cv_.notify_one, the background thread wakes up. But before wait
+  is allowed to actually return, it must re-acquire the mutex first.
 
-  Because your code kept the `join()` inside the scope of the `std::unique_lock`, we get a Mexican standoff:
-  1. The **Background Thread** is stuck on line 69 trying to acquire `mtx_` so it can finish waking up.
-  2. The **Main Thread** is holding `mtx_` and is stuck on line 27 in `join()`, waiting for the Background Thread to finish.
+  And the join call sits inside the scope of the same lock. Which produces a standoff:
+  1. The background thread is stuck trying to re-acquire the mutex so wait can finish waking
+     up.
+  2. The main thread is holding that same mutex and is stuck inside join, waiting for the
+     background thread to finish.
 
-  They wait on each other forever.
-
-  --------
-  WHICH FUNCTIONS FREEZE?
-  If we look at this mechanically at the function level, there are exactly two functions that freeze halfway through and never return:
-
-  1. **`std::thread::join()`** (called inside `~Logger()`)
-     The Main Thread enters this function and never returns. It is permanently asleep inside `join()`, waiting for the Background Thread to exit.
-
-  2. **`std::condition_variable::wait()`** (called inside `processQueue()`)
-     The Background Thread enters this function to go to sleep. When the Main Thread notifies it, it tries to wake up and return from the function. But because it cannot grab the lock, it gets stuck inside the internal locking mechanism of `wait()`. It never returns from `wait()`.
-
-  - Because `wait()` never finishes, `processQueue()` never finishes.
-  - Because `processQueue()` never finishes, `join()` never finishes.
-  - Because `join()` never finishes, `~Logger()` never finishes.
+  Each one is waiting on the other, forever.
 
   --------
-  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
-  Always drop your locks before yielding or waiting on other threads!
+  TRACE IT DOWN TO THE TWO CALLS THAT NEVER RETURN
+  At the function level, exactly two calls freeze halfway and never return:
+
+  1. thread::join, called inside the destructor. The main thread enters this call and never
+     comes back -- it is permanently asleep, waiting for the background thread to exit.
+  2. condition_variable::wait, called inside processQueue. The background thread enters this
+     to sleep. Notified, it tries to wake and return, but cannot grab the lock, so it gets
+     stuck inside wait's own internal locking. It never returns from wait.
+
+  Because wait never finishes, processQueue never finishes. Because processQueue never
+  finishes, join never finishes. Because join never finishes, the destructor never finishes.
+  One stuck call blocks the entire chain above it.
+
+  --------
+  SO THE LOCK HAS TO DROP BEFORE THE JOIN ON ANOTHER THREAD BEGINS
 ```text
 ~BadLogger() {
     {
@@ -85,5 +91,12 @@ Starting program...
     }
 }
 ```
-  Now, when the Background Thread wakes up, the lock is free. It successfully re-acquires the lock, reads `stop_ == true`, breaks the loop, and gracefully terminates, allowing `join()` to succeed.
+  Now when the background thread wakes up the lock is free. It re-acquires it, reads
+  stop_ == true, breaks its loop, and returns from processQueue -- which is what finally lets
+  join, and the destructor, succeed.
+
+  >> STANDARD NAMES
+     each side waiting on the other forever -> deadlock
+     wait's requirement before it can return -> re-acquiring the mutex
+     dropping a lock before a blocking call  -> scoping the lock to end before join/wait
 

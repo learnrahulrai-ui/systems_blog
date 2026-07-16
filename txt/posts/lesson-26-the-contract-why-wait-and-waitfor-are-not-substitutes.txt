@@ -11,130 +11,82 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
+  Lesson 25 fixed the crash by adding a third branch. Here is the deeper reason that branch was
+  missing in the first place: swapping one function call for a similar-looking one silently
+  changed what the function promises to the caller.
 
-  We had a working logger. The consumer loop used:
-
+  A working consumer loop used:
 ```text
 cv_.wait(lock, pred);
 ```
-
-  We wanted to add a periodic flush every 5 seconds. The obvious change:
-
+  Adding a periodic flush every 5 seconds looked like a one-line change:
 ```text
 cv_.wait_for(lock, 5s, pred);
 ```
+  After 5 seconds of idle, the program crashed on front() of an empty queue.
 
   --------
-  CRASH
+  SO WHY DOES SWAPPING ONE WAIT CALL FOR ANOTHER CRASH IT
+  Two functions, two different contracts.
 
-  After 5 seconds of idle, the program crashed on `front()` of an empty queue.
-
-  --------
-  WHY DID THIS HAPPEN?
-
-  **Two functions with different contracts.**
-
-  --------
-  WAIT(LOCK, PRED) — THE UNCONDITIONAL CONTRACT
-
-```text
-wait(lock, pred) returns  ⇔  pred() == true
-```
-
-  Internally:
-
+  wait(lock, pred) is unconditional: it returns if and only if pred() is true. Internally:
 ```text
 while (!pred()) {
     wait(lock);  // sleep until notified
 }
-// pred() is now true → return
+// pred() is now true -> return
 ```
+  It guarantees that when it returns, pred() is true, full stop. Spurious wakes are absorbed
+  by the loop -- they just go back to sleep and never escape. When wait returns, the caller can
+  count on one of two things being true: stop_ is true (shutdown), or the queue is non-empty
+  (work). One of those two always holds, so front() is safe.
 
-  The function **guarantees** that when it returns, `pred()` is `true`. Period. Spurious wakes are handled by the loop — they just go back to sleep.
-
-  When `wait` returns, the caller can safely assume:
-
-  | Guarantee | Value |
-  |-----------|-------|
-  | `stop_` | true (shutdown) |
-  | `!queue.empty()` | true (work) |
-
-  One of those two is always true. Line 86 (`front()`) is safe.
-
-  --------
-  WAIT_FOR(LOCK, 5S, PRED) — THE CONDITIONAL CONTRACT
-
-```text
-wait_for(lock, 5s, pred) returns  ⇔  pred() == true
-                                    OR
-                                     5s passed AND pred() currently evaluates to whatever it evaluates to
-```
-
-  Internally:
-
+  wait_for(lock, 5s, pred) is conditional: it returns if pred() is true, OR if 5 seconds pass
+  and pred() evaluates to whatever it currently evaluates to. Internally:
 ```text
 while (!pred()) {
     if (wait_for(lock, 5s) == cv_status::timeout) {
-        return pred();  // may return false!
+        return pred();  // may return false
     }
 }
 return true;
 ```
-
-  The function **does NOT guarantee** that `pred()` is `true` when it returns. It can return `false` if the timeout fires while the predicate is `false`.
-
-  When `wait_for` returns, the caller knows:
-
-  | Return value | Guarantee | Meaning |
-  |-------------|-----------|---------|
-  | `true` | `pred() == true` | Work or stop — same as `wait` |
-  | `false` | `pred() == false` | 5s passed, no work, not stopping — **new path** |
+  It does not guarantee pred() is true on return -- it can return false if the timeout fires
+  while the predicate is still false. A true return means work or stop, same guarantee as
+  plain wait. A false return means 5 seconds passed with no work and no stop signal -- a path
+  that plain wait simply cannot produce.
 
   --------
-  DISTILLED MODEL ERROR
-
-  A distilled (compressed) model of `wait_for` looks like:
-
-```text
-wait_for = wait + timeout
-```
-
-  This suggests: "it behaves like wait, but wakes up every 5s to check."
-
-  A real model of `wait_for` is:
-
-```text
-wait_for = wait WITH a different return contract
-```
-
-  The predicate loop is **inside** the function. When timeout fires, it evaluates `pred()` one final time and returns whatever it returns — without looping back to wait. The caller gets `false` and must handle it.
+  SO THE MENTAL SHORTCUT "WAIT PLUS A TIMEOUT" IS WRONG
+  The compressed model people reach for is wait_for = wait + timeout, which suggests it
+  behaves like wait but wakes up every 5 seconds to check. The real model is wait_for = wait
+  with a different return contract. The predicate loop lives inside the function; when the
+  timeout fires, it evaluates the predicate one final time and returns whatever that is,
+  without looping back to sleep. The caller receives false and is the one who has to handle it
+  -- nothing inside wait_for handles it automatically.
 
   --------
-  TWO KINDS OF "WAKES UP"
+  SO THERE IS A WAKE REASON THAT ONLY EXISTS FOR WAIT_FOR
+      wake reason          wait behavior              wait_for behavior
+      notify_one, work     re-check pred, return true  re-check pred, return true
+      notify_one, stop     re-check pred, return true  re-check pred, return true
+      spurious             re-check pred, loop if false re-check pred, loop if false
+      5s timeout            cannot happen               return false immediately
 
-  | Wake reason | `wait` behavior | `wait_for` behavior |
-  |------------|----------------|---------------------|
-  | `notify_one` (work) | re-check pred, return if true | re-check pred, return true |
-  | `notify_one` (stop) | re-check pred, return if true | re-check pred, return true |
-  | Spurious | re-check pred, loop if false | re-check pred, loop if false |
-  | **Timeout (5s)** | **N/A — can't happen** | **return false immediately** |
-
-  The fourth row doesn't exist for `wait`. It's an entirely new return path that `wait_for` introduces.
+  That fourth row has no equivalent under wait. It is an entirely new return path that
+  wait_for introduces on its own.
 
   --------
-  FIX PATTERN
-
+  SO THE FIX HAS TO TREAT FALSE AS ITS OWN CASE
 ```text
-// wait_for returns false → 5s passed, no work, not stopping
+// wait_for returns false -> 5s passed, no work, not stopping
 if (!cv_.wait_for(lock, 5s, pred)) {
     lock.unlock();
     flushPending();   // periodic housekeeping
     continue;         // back to top of loop
 }
 
-// wait_for returned true → pred was satisfied
+// wait_for returned true -> pred was satisfied
 if (stop_ && queue.empty()) {
     flushPending();
     break;
@@ -144,16 +96,16 @@ msg = queue.front();
 ```
 
   --------
-  KEY INSIGHT
+  SO THE BUG WAS NEVER ABOUT TIMEOUTS OR QUEUES AT ALL
+  The bug was assuming two functions share a contract when they do not. wait_for is not "wait
+  with a timeout" -- it is a different function with a different return contract, and the
+  timeout is not an addition to wait's behavior, it is a restructuring of how and when the
+  function is allowed to return.
 
-  The bug was not about timeouts, or periodic flushing, or queue management. The bug was about **assuming two functions share a contract** when they don't.
+  experiment/test_timeout_periodic_flush.cpp runs the corrected wait_for with the timeout
+  handler in place: all 14 assertions pass.
 
-  `wait_for` is not "`wait` with a timeout." It is a fundamentally different function with a fundamentally different return contract. The timeout is not an addition — it's a restructuring of how and when the function can return.
-
-  --------
-  EXPERIMENT
-
-  File: `experiment/test_timeout_periodic_flush.cpp` — correct `wait_for` with the timeout handler.
-
-  All 14 assertions pass.
-
+  >> STANDARD NAMES
+     wait's return guarantee            -> pred() is always true on return
+     wait_for's weaker return guarantee -> pred() may be false, caller must check
+     the new path wait_for introduces   -> the timeout-with-no-work branch

@@ -11,20 +11,20 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  You implemented **TODO 4**, but you intentionally omitted the check for `!log_queue_.empty()`. You wrote your wait condition like this:
+  Lesson 6 fixed the crash by checking a condition before waking up. Half of that condition
+  is missing here on purpose: the wait predicate only checks for shutdown, never for new data.
 
 ```text
-// Your logic: Only wake up if the server is shutting down.
+// only wake up if the server is shutting down
 cv_.wait(lock, [this]() { return stop_; });
 ```
 
-  I created `experiment/todo4_stop_only_bug.cpp` using your exact logic. The Main Thread simulates normal server traffic, pushing logs into the queue and calling `notify_one()` while the server is running.
+  experiment/todo4_stop_only_bug.cpp runs that exact predicate while the main thread pushes
+  normal traffic into the queue and calls notify_one, server running, nothing shutting down.
 
   --------
-  WE RECORD THE REAL RUNTIME OUTCOME
-  Here is the exact output of your code:
+  THEN THE RUN, NOT A PREDICTION
+  Here is the exact output:
 ```text
 Starting program...
 [Main Thread] User hit endpoint! Logging message: Request 1
@@ -41,23 +41,26 @@ Program ended successfully.
 ```
 
   --------
-  EXPLANATION (WHY YOU FAILED)
-  Your condition variable predicate `return stop_;` essentially tells the Background Thread: *"Never wake up unless the server is literally shutting down."*
+  SO WHY DOES THE QUEUE JUST SIT THERE
+  return stop_ tells the background thread exactly one thing: never wake up unless the server
+  is literally shutting down. Here is the mechanical timeline that predicate produces:
+  1. Main thread pushes "Request 1" into the queue.
+  2. Main thread calls cv_.notify_one().
+  3. Background thread wakes up and evaluates return stop_.
+  4. stop_ is false, so the predicate says no, and the thread goes right back to sleep,
+     ignoring the message it was just notified about.
+  5. This repeats for hours. log_queue_ grows without bound in memory. Nothing reaches disk.
 
-  Here is the exact mechanical timeline of your failure:
-  1. **Main Thread**: Pushes "Request 1" into the queue.
-  2. **Main Thread**: Calls `cv_.notify_one()`.
-  3. **Background Thread**: Wakes up! It evaluates the lambda `return stop_;`.
-  4. **Background Thread**: Since `stop_ == false`, it says, *"Nope, condition not met!"* and immediately **goes right back to sleep**. It completely ignores the log message!
-  5. This repeats for hours. The `log_queue_` grows endlessly in memory, consuming gigabytes of RAM. Nothing is ever written to disk.
-
-  Then, when you finally hit CTRL+C and shut down the server:
-  6. **Main Thread**: Sets `stop_ = true` and calls `notify_one()`.
-  7. **Background Thread**: Wakes up, evaluates `return stop_;` (which is now true), and finally starts popping the millions of logs out of the queue all at once!
+  Then, at shutdown:
+  6. Main thread sets stop_ = true and calls notify_one.
+  7. Background thread wakes, evaluates return stop_ (now true), and pops every queued log at
+     once, all in one burst, right before the process exits.
 
   --------
-  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
-  You are building an *Asynchronous Logger*, not a *Shutdown Logger*. The Background Thread must wake up if we are stopping **OR** if there is data to process.
+  SO THE PREDICATE NEEDS BOTH CONDITIONS, NOT ONE
+  This is an asynchronous logger, not a shutdown-only logger. The background thread has to wake
+  up if the server is stopping, or if there is data to process -- either one, not just one of
+  them.
 
 ```text
 cv_.wait(lock, [this]() { 
@@ -65,5 +68,10 @@ cv_.wait(lock, [this]() {
 });
 ```
 
-  By adding `|| !log_queue_.empty()`, the thread wakes up the very microsecond a new log enters the queue, writes it to disk, and goes back to sleep.
+  Adding that one clause makes the thread wake the moment a new log enters the queue, write it
+  to disk, and go back to sleep -- instead of hoarding everything in RAM until shutdown.
+
+  >> STANDARD NAMES
+     wait predicate that only checks stop_   -> flush-on-shutdown (the bug)
+     wait predicate checking stop_ OR queue  -> the correct asynchronous-logger predicate
 

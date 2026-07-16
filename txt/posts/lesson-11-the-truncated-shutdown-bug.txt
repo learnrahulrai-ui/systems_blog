@@ -11,21 +11,21 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  You asked what happens if we remove `&& log_queue_.empty()` from the loop termination check:
+  The predicate is fixed. The exit condition right below it is not. What happens if the loop's
+  break check forgets to ask whether the queue is actually empty first?
+
 ```text
-// Bug: Missing the queue check!
+// missing the queue check
 if (stop_) {
-    break; 
+    break;
 }
 ```
 
-  I created `experiment/todo4_truncated_shutdown_bug.cpp` to simulate this. The Main Thread pushes 5 critical logs rapidly, but before the slow hard drive can finish writing them, the Main Thread initiates a clean server shutdown.
+  experiment/todo4_truncated_shutdown_bug.cpp pushes 5 critical logs rapidly, then triggers a
+  clean shutdown before the slow hard drive can finish writing all five.
 
   --------
-  WE RECORD THE REAL RUNTIME OUTCOME
-  When I ran the experiment, here is exactly what happened:
+  THEN THE RUN, NOT A PREDICTION
 
 ```text
 [main] Starting program...
@@ -40,25 +40,33 @@ if (stop_) {
 ```
 
   --------
-  EXPLANATION OF THE RUNTIME FAILURE MECHANISM
-  When `stop_` was set to true by the Main Thread, there were still 4 logs sitting in the queue waiting to be written!
+  SO WHY DOES THE THREAD DIE WITH LOGS STILL QUEUED
+  When stop_ was set to true, 4 logs were still sitting in the queue, unwritten.
 
-  The Background Thread woke up, popped "Critical Transaction 1", and wrote it to disk.
-  Then, the `while (true)` loop circled back to the top. It hit your broken `if` statement:
+  The background thread woke, popped "Critical Transaction 1", wrote it to disk, then the
+  while(true) loop circled back to the break check:
 ```text
 if (stop_) break;
 ```
-  Because `stop_` is true, the `if` statement evaluated to true! The Background Thread instantly broke out of the loop and died, completely abandoning the remaining 4 logs in the queue. They were permanently destroyed.
+  stop_ is true, so the check passes and the thread breaks out of the loop immediately,
+  abandoning the remaining 4 logs in the queue. They are gone, not written, not recoverable.
 
   --------
-  WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED
-  This is why the draining condition must check **both** variables:
+  SO THE EXIT CHECK NEEDS BOTH CONDITIONS TOO
+  The draining condition has to check both variables, the same as the wakeup predicate did:
 ```text
 if (stop_ && log_queue_.empty()) {
     break;
 }
 ```
-  With this correct logic, the Background Thread says: *"Okay, `stop_` is true. But the queue still has 4 items in it! Therefore, `log_queue_.empty()` is false. The condition fails! I must skip the `break`, loop around, and write the next log."*
+  Now stop_ being true is not enough on its own: the queue still has 4 items, so
+  log_queue_.empty() is false, the whole condition fails, and the thread skips the break, loops
+  around, and writes the next log instead.
 
-  It will forcefully stay alive, popping and writing logs, until the queue finally reaches 0. Only then does it allow itself to `break` and die.
+  It stays alive, popping and writing, until the queue actually reaches zero. Only then does it
+  allow itself to break and exit.
+
+  >> STANDARD NAMES
+     exit check missing the queue condition -> truncated shutdown (the bug)
+     exit check requiring stop_ AND empty   -> the drain-before-exit fix
 

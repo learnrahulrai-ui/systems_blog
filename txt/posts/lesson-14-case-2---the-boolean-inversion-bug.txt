@@ -11,47 +11,51 @@
 
 
 
-  --------
-  WE SETUP THE TEST CASES BY HAND
-  We removed the queue check from the lambda, leaving only the shutdown check:
+  Case 2 from the permutation matrix: the queue check is dropped from the wakeup lambda,
+  leaving only the shutdown check.
 ```text
 cv_.wait(lock, [this]() { return stop_; });
 ```
+  Two real questions came up while tracing this one, plus one wrong mental model that explains
+  the whole bug once it is corrected.
 
   --------
-  WE RUN THE CODE STANDALONE
-  You asked two critical questions and made one massive error in logic.
+  FIRST: IS TAKING A LOCK IN LOG() ACTUALLY BAD
+  No -- it is mandatory. A web server can have 100 users hit the API in the same millisecond,
+  which means 100 HTTP threads calling log() at once. std::queue is not thread-safe: two
+  threads pushing to it without a lock will corrupt its internal pointers and segfault the
+  server. The lock is what guarantees only one thread pushes at a time.
 
   --------
-  1. "WE TRY TO TAKE A LOCK IN LOG WHY ;; TAKING A LOCK IS BAD"
-  Taking a lock in `log()` is **NOT BAD**. It is absolutely mandatory.
-  You are building a web server. 100 users might hit your API in the exact same millisecond. That means 100 HTTP threads will call `Logger::log()` at the exact same time.
-  `std::queue` is **not thread-safe**. If two threads try to push to it without locking, the internal memory pointers will instantly corrupt and your server will segfault. The lock ensures only one thread pushes at a time.
+  SECOND: DOES PROCESSQUEUE NEED TO NOTIFY ANYONE
+  No. processQueue is the consumer -- it eats the data. main() does not wait to be told when a
+  log is written; it drops the log off and moves on. Since nothing is waiting on processQueue,
+  processQueue has nothing to notify.
 
   --------
-  2. "DO WE NOTIFY IN PROCESS QUEUE AT ALL DO WE NEED TO ??"
-  **No.** `processQueue` is the consumer. It eats the data. `main()` does not care when the data is written; it just drops it off and walks away. Because no one is waiting on `processQueue`, `processQueue` does not need to notify anyone.
+  THIRD, AND THIS IS THE ACTUAL BUG: WHAT DOES FALSE MEAN HERE
+  The mental model that broke: treating cv_.wait like a bouncer checking IDs, where false means
+  "you're fine, go ahead."
+
+  It is the opposite. cv_.wait is a tollbooth waiting for a green light. If the lambda returns
+  false, the thread is told the light is still red -- go back to sleep. Only true lets it pass.
+
+  Trace the logic with that corrected rule:
+  1. main() pushes a log and calls notify_one().
+  2. The background thread wakes up.
+  3. It evaluates return stop_.
+  4. stop_ is false.
+  5. False means red light. The thread goes straight back to sleep.
+  6. It never reaches log_queue_.pop().
 
   --------
-  3. THE FATAL FLAW: "SEE STOP IS FALSE ;; OK NO PORIBLEM WE GO AHEAD"
-  This is the core of your misunderstanding!
+  SO THIS IS THE SAME FAILURE AS LESSON 7, FROM THE OPPOSITE DIRECTION
+  Because the thread keeps going back to sleep, logs pile up in RAM without limit. Not a single
+  log reaches disk while the server is running -- only when main() finally shuts the server
+  down does stop_ become true and the thread wake for real. If the server crashes before that
+  point, everything queued is lost.
 
-  You think `cv_.wait` acts like a bouncer checking for fake IDs (where false = good to go).
-  **FALSE.** `cv_.wait` acts like a tollbooth waiting for a Green Light!
-
-  If the lambda returns `FALSE`, the thread says: *"Nope, the light is still red, the condition has not been met. Go back to sleep!"*
-  If the lambda returns `TRUE`, the thread says: *"Green light! I am allowed to pass!"*
-
-  Let's trace your logic with this corrected rule:
-  1. `main()` pushes a log and calls `notify_one()`.
-  2. The Background Thread wakes up.
-  3. It evaluates `[this]() { return stop_; }`.
-  4. `stop_` is **FALSE**.
-  5. The Background Thread sees FALSE. It says *"Red Light!"* and **goes permanently back to sleep**.
-  6. It NEVER reaches `log_queue_.pop()`.
-
-  --------
-  UNEXPECTED SYSTEM RUNTIME OUTCOME
-  This is the **Flush-on-Shutdown Bug** we covered in Lesson 7!
-  Because the thread goes back to sleep, the logs just pile up in RAM. It will never write a single log to disk while the server is running. It will only wake up when `main()` shuts down the server (and `stop_` finally becomes TRUE). If the server crashes before then, you lose everything.
-
+  >> STANDARD NAMES
+     wait() returning false        -> stay asleep, not "proceed"
+     wait() returning true         -> the only way past the predicate
+     this exact failure by name    -> flush-on-shutdown (lesson 7)

@@ -11,126 +11,63 @@
 
 
 
-  I built a C++ test harness that compiled all 8 logic permutations and executed 10 edge-case test cases against each version, capturing the exact point of failure using a timeout supervisor.
+  Eight logic permutations, ten edge-case scenarios each: 80 runs total, every one driven
+  through a C++ test harness with a timeout supervisor so a hang gets caught instead of just
+  freezing the run. Below is every result, not a sample of them.
 
   --------
-  V1: PERFECT PATTERN (WAIT(STOP||!EMPTY), IF(STOP&&EMPTY) BREAK;)
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | ✅ SUCCESS |
-  | Single Log Runtime | ✅ SUCCESS |
-  | Burst Logs Runtime | ✅ SUCCESS |
-  | Spurious Wakeup | ✅ SUCCESS |
-  | Truncated Shutdown | ✅ SUCCESS |
-  | Late Shutdown | ✅ SUCCESS |
-  | Log after Spurious | ✅ SUCCESS |
-  | Staggered Logs | ✅ SUCCESS |
-  | Massive Backlog Shutdown | ✅ SUCCESS |
-  | Immediate Shutdown | ✅ SUCCESS |
+  FIRST, WHAT THE EIGHT VERSIONS ARE
+  V1: the perfect pattern -- wait(stop_ || !empty), if (stop_ && empty) break
+  V2: missing stop_ in the lambda
+  V3: missing !empty in the lambda
+  V4: missing stop_ in the break check
+  V5: missing empty in the break check
+  V6: missing the break clause entirely
+  V7: missing stop_ in both places
+  V8: missing empty in both places
 
   --------
-  V2: MISSING STOP_ IN LAMBDA
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Single Log Runtime | 🔒 DEADLOCK (Thread hung forever) |
-  | Burst Logs Runtime | 🔒 DEADLOCK (Thread hung forever) |
-  | Spurious Wakeup | 🔒 DEADLOCK (Thread hung forever) |
-  | Truncated Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Late Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Log after Spurious | 🔒 DEADLOCK (Thread hung forever) |
-  | Staggered Logs | 🔒 DEADLOCK (Thread hung forever) |
-  | Massive Backlog Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Immediate Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  THEN THE FULL RESULT GRID
+  OK = correct. DL = deadlock, thread hangs forever. LOSS = queued logs silently destroyed.
+  CR = crash, segfault popping an empty queue.
+
+      TEST                          V1   V2   V3    V4   V5    V6   V7   V8
+      Idle Shutdown                 OK   DL   OK    OK   OK    CR   DL   OK
+      Single Log Runtime            OK   DL   LOSS  OK   OK    CR   DL   LOSS
+      Burst Logs Runtime            OK   DL   LOSS  OK   OK    CR   DL   LOSS
+      Spurious Wakeup                OK   DL   OK    OK   OK    CR   DL   OK
+      Truncated Shutdown             OK   DL   OK    OK   LOSS  CR   DL   LOSS
+      Late Shutdown                  OK   DL   OK    OK   OK    CR   DL   OK
+      Log after Spurious             OK   DL   LOSS  OK   OK    CR   DL   LOSS
+      Staggered Logs                 OK   DL   OK    OK   OK    CR   DL   OK
+      Massive Backlog Shutdown       OK   DL   OK    OK   LOSS  CR   DL   LOSS
+      Immediate Shutdown             OK   DL   OK    OK   OK    CR   DL   OK
 
   --------
-  V3: MISSING !EMPTY IN LAMBDA
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | ✅ SUCCESS |
-  | Single Log Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Burst Logs Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Spurious Wakeup | ✅ SUCCESS |
-  | Truncated Shutdown | ✅ SUCCESS |
-  | Late Shutdown | ✅ SUCCESS |
-  | Log after Spurious | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Staggered Logs | ✅ SUCCESS |
-  | Massive Backlog Shutdown | ✅ SUCCESS |
-  | Immediate Shutdown | ✅ SUCCESS |
+  SO THE 80 RESULTS COLLAPSE INTO FOUR PATTERNS
+  V6 fails all 10 -- with no break statement at all, every single run eventually pops an empty
+  queue and segfaults.
 
-  --------
-  V4: MISSING STOP_ IN BREAK
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | ✅ SUCCESS |
-  | Single Log Runtime | ✅ SUCCESS |
-  | Burst Logs Runtime | ✅ SUCCESS |
-  | Spurious Wakeup | ✅ SUCCESS |
-  | Truncated Shutdown | ✅ SUCCESS |
-  | Late Shutdown | ✅ SUCCESS |
-  | Log after Spurious | ✅ SUCCESS |
-  | Staggered Logs | ✅ SUCCESS |
-  | Massive Backlog Shutdown | ✅ SUCCESS |
-  | Immediate Shutdown | ✅ SUCCESS |
+  V2 and V7 fail all 10 -- both are missing stop_ from the lambda, and lesson 13 already traced
+  why: the moment shutdown finds the queue empty, the wakeup predicate refuses to let the
+  thread pass, and main hangs in join forever. V4 being present or absent in the break check
+  makes no difference here, because the thread never lives long enough to reach the break line
+  at all.
 
-  --------
-  V5: MISSING EMPTY IN BREAK
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | ✅ SUCCESS |
-  | Single Log Runtime | ✅ SUCCESS |
-  | Burst Logs Runtime | ✅ SUCCESS |
-  | Spurious Wakeup | ✅ SUCCESS |
-  | Truncated Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
-  | Late Shutdown | ✅ SUCCESS |
-  | Log after Spurious | ✅ SUCCESS |
-  | Staggered Logs | ✅ SUCCESS |
-  | Massive Backlog Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
-  | Immediate Shutdown | ✅ SUCCESS |
+  V4 matches V1 exactly, 10 for 10 -- confirming lesson 15's proof that stop_ inside the break
+  check is mathematically redundant once the lambda already guarantees the thread cannot reach
+  that line unless stop_ is true or the queue is non-empty.
 
-  --------
-  V6: MISSING BREAK CLAUSE COMPLETELY
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | 💀 CRASH (Segfault on empty queue) |
-  | Single Log Runtime | 💀 CRASH (Segfault on empty queue) |
-  | Burst Logs Runtime | 💀 CRASH (Segfault on empty queue) |
-  | Spurious Wakeup | 💀 CRASH (Segfault on empty queue) |
-  | Truncated Shutdown | 💀 CRASH (Segfault on empty queue) |
-  | Late Shutdown | 💀 CRASH (Segfault on empty queue) |
-  | Log after Spurious | 💀 CRASH (Segfault on empty queue) |
-  | Staggered Logs | 💀 CRASH (Segfault on empty queue) |
-  | Massive Backlog Shutdown | 💀 CRASH (Segfault on empty queue) |
-  | Immediate Shutdown | 💀 CRASH (Segfault on empty queue) |
+  V3 and V8 fail exactly the runs where a log is pushed while the server keeps running (not
+  just at shutdown) -- the lambda missing !empty means only stop_ can wake the thread, so any
+  log written during normal operation sits unread until shutdown, and V8 additionally loses the
+  truncated-shutdown cases because it is also missing the queue check in the break condition.
+  V5 fails only the two truncated-shutdown-shaped runs, matching lesson 11 exactly.
 
-  --------
-  V7: MISSING STOP_ IN BOTH
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Single Log Runtime | 🔒 DEADLOCK (Thread hung forever) |
-  | Burst Logs Runtime | 🔒 DEADLOCK (Thread hung forever) |
-  | Spurious Wakeup | 🔒 DEADLOCK (Thread hung forever) |
-  | Truncated Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Late Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Log after Spurious | 🔒 DEADLOCK (Thread hung forever) |
-  | Staggered Logs | 🔒 DEADLOCK (Thread hung forever) |
-  | Massive Backlog Shutdown | 🔒 DEADLOCK (Thread hung forever) |
-  | Immediate Shutdown | 🔒 DEADLOCK (Thread hung forever) |
+  Every one of the 80 outcomes traces back to one of the five failure modes already proven in
+  lessons 11 through 14. The matrix does not introduce a new bug -- it proves those five are
+  the only ways this pair of lines can fail.
 
-  --------
-  V8: MISSING EMPTY IN BOTH
-  | Test Case | Result |
-  |---|---|
-  | Idle Shutdown | ✅ SUCCESS |
-  | Single Log Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Burst Logs Runtime | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Spurious Wakeup | ✅ SUCCESS |
-  | Truncated Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
-  | Late Shutdown | ✅ SUCCESS |
-  | Log after Spurious | ❌ DATA LOSS (Runtime Ignore / Flush-on-Shutdown) |
-  | Staggered Logs | ✅ SUCCESS |
-  | Massive Backlog Shutdown | ❌ DATA LOSS (Truncated Shutdown) |
-  | Immediate Shutdown | ✅ SUCCESS |
-
-
+  >> STANDARD NAMES
+     OK / DL / LOSS / CR -> success, deadlock, silent data loss, segfault crash
+     the redundant check proven here -> stop_ inside the break condition (V1 == V4)

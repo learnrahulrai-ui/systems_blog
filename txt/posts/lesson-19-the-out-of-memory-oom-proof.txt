@@ -11,16 +11,13 @@
 
 
 
-  You asked for physical C++ proof with no gossip.
-
-  I wrote `experiment/todo4_missing_consumer_oom_bug.cpp`.
-  In this experiment, I removed `!log_queue_.empty()` from the lambda, leaving only `[this](){ return stop_; }`.
-
-  Then, I built an "Eternal Server". It boots up, accepts 1,000,000 user requests, and never shuts down.
+  Lesson 18 predicted the eternal-server OOM failure from substitution alone. Here is the same
+  claim with no substitution, just a real run: experiment/todo4_missing_consumer_oom_bug.cpp
+  removes !log_queue_.empty() from the lambda, leaving only [this](){ return stop_; }, boots an
+  eternal server, and fires 1,000,000 requests at it without ever shutting down.
 
   --------
-  EXECUTION OUTPUT
-  Here is the exact output straight from the compiler and executable:
+  THEN THE RUN, NOT A PREDICTION
 
 ```text
 [main] Starting Eternal Server...
@@ -38,9 +35,13 @@ BUG CONFIRMED: Missing Consumer! Thread never woke up. OOM imminent.
 ```
 
   --------
-  CONCLUSION
-  Despite having 2 full seconds of idle CPU time, the Background Thread wrote exactly **0** logs to the disk.
+  SO THE PREDICTION HOLDS UNDER A REAL RUN
+  Despite 2 full seconds of idle CPU time with nothing else running, the background thread
+  wrote exactly 0 logs to disk. stop_ was false, so the thread never woke up, and all
+  1,000,000 strings sat trapped in RAM. In production, that server runs out of memory within
+  hours, not days.
 
-  Because `stop_` was false, the thread never woke up.
-  1,000,000 strings were permanently trapped in RAM. In a production environment, this server crashes from an Out-Of-Memory exception within hours.
+  >> STANDARD NAMES
+     logs pushed but never popped -> trapped in RAM
+     the process this leads to    -> OOM crash
 
