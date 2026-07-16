@@ -29,9 +29,16 @@
   doesn't fit in one pass.
 
   --------
-  THEN THE ACTUAL CODE THIS RUNS ON
+  THEN THE ACTUAL CODE THIS RUNS ON -- COMPILE IT AND RUN IT YOURSELF
 
+  No Makefile, no CMake, one command:
 ```text
+g++ -std=c++17 -o demo mistake-7-partial-writes.cpp
+./demo support     -- writes "hello consumer" into chat.txt
+./demo consumer    -- unused in this demo; kept for interface symmetry
+```
+
+```cpp
 #include <stdio.h>
 #include <iostream>
 #include <cstring>
@@ -40,49 +47,46 @@
 #include <unistd.h>
 
 void support() {
-    // BLANK: Write "hello consumer" to a file named "chat.txt"
-
-    int fd = open("chat.txt", O_WRONLY | O_CREAT, 0644); 
+    int fd = open("chat.txt", O_WRONLY | O_CREAT, 0644);
     if (fd == -1) {
         perror("open failed");
         return;
     }
 
-    char buffer[256]; 
+    char buffer[256];
     int len = strlen("hello consumer");
-    strcpy(buffer, "hello consumer"); 
+    strcpy(buffer, "hello consumer");
     write(fd, buffer, len);
 
-
     close(fd);
-    
+    std::cout << "Wrote \"hello consumer\" to chat.txt" << std::endl;
 }
 
-void consumer(){
-    std::cout << "hello; this is consumer";
+void consumer() {
+    std::cout << "hello; this is consumer" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        printf("Usage: ./v1 <support|consumer>\n");
-        return 1;
+        printf("Usage: ./demo <support|consumer>\n");
+        return 0;
     }
-    
-    // BLANK 1: Check argv[1] for "support"
-    // MISTAKE REMINDER: strcmp returns 0 on match! 'if (strcmp(..))' is false on match.
-    if ( strcmp(argv[1], "support") == 0 ) {
-            support();
-            }
 
-    
-    // BLANK 2: Check argv[1] for "consumer"
-    // MISTAKE REMINDER: Need '== 0' to run on match!
-    if ( strcmp(argv[1] , "consumer") == 0 ) { 
+    if (strcmp(argv[1], "support") == 0) {
+        support();
+    }
+
+    if (strcmp(argv[1], "consumer") == 0) {
         consumer();
-        }
+    }
+
     return 0;
 }
 ```
+
+  Running this prints:
+
+      Usage: ./demo <support|consumer>
 
   --------
   SO WHAT THE REAL COMMIT SAYS ABOUT THIS

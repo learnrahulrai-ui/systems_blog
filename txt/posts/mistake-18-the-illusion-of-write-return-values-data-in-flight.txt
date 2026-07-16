@@ -25,9 +25,16 @@ write(100MB) ---> returns 638,976 (bytes accepted into the local kernel's send b
 ```
 
   --------
-  THEN THE ACTUAL CODE THIS RUNS ON
+  THEN THE ACTUAL CODE THIS RUNS ON -- COMPILE IT AND RUN IT YOURSELF
 
+  No Makefile, no CMake, one command (same loopback IP for both, e.g. 127.0.0.1):
 ```text
+g++ -std=c++17 -o demo mistake-18-write-return-illusion.cpp
+./demo support 127.0.0.1     -- terminal 1, pushes 100MB of random bytes
+./demo consumer 127.0.0.1    -- terminal 2, reads once, holds the socket open
+```
+
+```cpp
 #include <stdio.h>
 #include <iostream>
 #include <cstring>
@@ -49,27 +56,27 @@ void fill_random(char* buf, size_t size) {
 
 void support(const char* ip) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    int opt = 1; 
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)); 
-    
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
     struct sockaddr_in address;
     address.sin_family = AF_INET;
     inet_pton(AF_INET, ip, &address.sin_addr);
     address.sin_port = htons(8080);
-    
+
     bind(server_fd, (struct sockaddr*)&address, sizeof(address));
     listen(server_fd, 100);
-    
+
     int client_fd = accept(server_fd, nullptr, nullptr);
-    
+
     char* buffer = new char[100000000]; // 100MB
     fill_random(buffer, 100000000);
-    
+
     int written_now = write(client_fd, buffer, 100000000);
     sleep(2);
-    
+
     std::cout << "Server (IP " << ip << ") successfully pushed " << written_now << " bytes into the network." << std::endl;
-    
+
     close(client_fd);
     close(server_fd);
     delete[] buffer;
@@ -81,29 +88,36 @@ void consumer(const char* ip) {
     address.sin_family = AF_INET;
     address.sin_port = htons(8080);
     inet_pton(AF_INET, ip, &address.sin_addr);
-    
+
     connect(client_fd, (struct sockaddr *)&address, sizeof(address));
-    
+
     int requested_bytes = 3000000; // 3MB
-    char* buffer = new char[requested_bytes]; 
-    
+    char* buffer = new char[requested_bytes];
+
     sleep(2);
-    
+
     int bytes_read = read(client_fd, buffer, requested_bytes);
-    
+    std::cout << "Consumer read " << bytes_read << " bytes, then holding the socket open..." << std::endl;
+
+    // deliberately NOT closing here -- lets data still in flight sit
+    // unread while we sleep, matching the post's "data in flight" claim
     // close(client_fd);
     sleep(13);
     delete[] buffer;
 }
 
 int main(int argc, char* argv[]) {
-    signal(SIGPIPE, SIG_IGN); 
-    if (argc < 3) return 1;
+    signal(SIGPIPE, SIG_IGN);
+    if (argc < 3) { printf("Usage: ./demo <support|consumer> <ip>\n"); return 0; }
     if (strcmp(argv[1], "support") == 0) support(argv[2]);
     if (strcmp(argv[1], "consumer") == 0) consumer(argv[2]);
     return 0;
 }
 ```
+
+  Running this prints:
+
+      Usage: ./demo <support|consumer> <ip>
 
   --------
   SO WHAT THE REAL COMMIT SAYS ABOUT THIS
