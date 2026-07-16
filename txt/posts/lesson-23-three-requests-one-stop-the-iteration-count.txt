@@ -16,27 +16,171 @@
 
   --------
   FIRST, THE TRACE FOR THREE REQUESTS
-  experiment/test_three_req_one_stop.cpp:
+  experiment/test_three_req_one_stop.cpp. Compile it yourself, no Makefile, no CMake:
 ```text
+g++ -std=c++17 -o demo lesson-23-three-requests-one-stop.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <fstream>
+
+class Logger {
+public:
+    Logger() {
+        file_ = fopen("test_three_req.log", "w");
+        background_writer_ = std::thread(&Logger::processQueue, this);
+    }
+
+    ~Logger() {
+        std::cout << "[~Logger] Shutdown started\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        flushPending();
+        if (file_) fclose(file_);
+        std::cout << "[~Logger] Shutdown done\n";
+    }
+
+    void log(const std::string& msg) {
+        std::string formatted = msg + "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(std::move(formatted));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void processQueue() {
+        int iteration = 0;
+        while (true) {
+            iteration++;
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+
+            std::cout << "[processQueue] Iteration " << iteration
+                      << " -- stop_=" << stop_
+                      << " queue_size=" << log_queue_.size()
+                      << " pending_size=" << pending_.size() << "\n";
+
+            if (stop_ && log_queue_.empty()) {
+                std::cout << "[processQueue] stop && empty -> flushing pending_ \""
+                          << (pending_.empty() ? "(empty)" : pending_.substr(0, pending_.size()-1))
+                          << "\" and breaking\n";
+                flushPending();
+                break;
+            }
+
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+
+            pending_ += msg;
+            std::cout << "[processQueue] Popped \"" << msg.substr(0, msg.size()-1)
+                      << "\" pending_ now " << pending_.size() << " bytes\n";
+            if (pending_.size() >= 4096) flushPending();
+        }
+        std::cout << "[processQueue] Exited loop after " << iteration << " iterations\n";
+    }
+
+    void flushPending() {
+        if (file_ && !pending_.empty()) {
+            std::cout << "[flushPending] Writing to disk: \"" << pending_.substr(0, pending_.size()-1) << "\"\n";
+            fprintf(file_, "%s", pending_.c_str());
+            fflush(file_);
+            pending_.clear();
+        } else {
+            std::cout << "[flushPending] Nothing to flush\n";
+        }
+    }
+
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+    FILE* file_ = nullptr;
+    std::string pending_;
+};
+
+int main() {
+    std::cout << "[main] === TEST: Three requests, then stop ===\n";
+    {
+        Logger logger;
+
+        std::cout << "[main] Request 1 arrives\n";
+        logger.log("Request 1: User logged in");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        std::cout << "[main] Request 2 arrives\n";
+        logger.log("Request 2: User clicked button");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        std::cout << "[main] Request 3 arrives\n";
+        logger.log("Request 3: User saved document");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        std::cout << "[main] Shutdown signal received\n";
+    }
+
+    std::cout << "\n[main] === VERIFYING LOG FILE ===\n";
+    std::ifstream log_file("test_three_req.log");
+    std::string line;
+    int count = 0;
+    while (std::getline(log_file, line)) {
+        std::cout << "  Line " << ++count << ": \"" << line << "\"\n";
+    }
+    log_file.close();
+
+    if (count == 3) {
+        std::cout << "[main] PASS: Exactly 3 logs written\n";
+    } else {
+        std::cout << "[main] FAIL: Expected 3 logs, got " << count << "\n";
+    }
+
+    std::remove("test_three_req.log");
+    return count == 3 ? 0 : 1;
+}
+```
+  Running this prints:
+```text
+[main] === TEST: Three requests, then stop ===
 [main] Request 1 arrives
 [processQueue] Iteration 1 -- stop_=0 queue_size=1 pending_size=0
 [processQueue] Popped "Request 1: User logged in" pending_ now 26 bytes
-
 [main] Request 2 arrives
 [processQueue] Iteration 2 -- stop_=0 queue_size=1 pending_size=26
 [processQueue] Popped "Request 2: User clicked button" pending_ now 57 bytes
-
 [main] Request 3 arrives
 [processQueue] Iteration 3 -- stop_=0 queue_size=1 pending_size=57
 [processQueue] Popped "Request 3: User saved document" pending_ now 88 bytes
-
 [main] Shutdown signal received
-[~Logger] stop_=true, notify_one
-
+[~Logger] Shutdown started
 [processQueue] Iteration 4 -- stop_=1 queue_size=0 pending_size=88
-[processQueue] stop && empty -> flushing pending_ and breaking
-[flushPending] Writing to disk: all 3 requests batched together
+[processQueue] stop && empty -> flushing pending_ "Request 1: User logged in
+Request 2: User clicked button
+Request 3: User saved document" and breaking
+[flushPending] Writing to disk: "Request 1: User logged in
+Request 2: User clicked button
+Request 3: User saved document"
+[processQueue] Exited loop after 4 iterations
+[flushPending] Nothing to flush
+[~Logger] Shutdown done
 
+[main] === VERIFYING LOG FILE ===
+  Line 1: "Request 1: User logged in"
+  Line 2: "Request 2: User clicked button"
+  Line 3: "Request 3: User saved document"
 [main] PASS: Exactly 3 logs written
 ```
 

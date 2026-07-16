@@ -17,21 +17,81 @@
 
   experiment/todo4_immortal_logger.cpp deletes stop_, deletes the break clause, deletes the
   destructor, and spawns the thread detached so it lives independently of the object entirely.
-  The background thread reduces to this:
-
+  Compile it yourself, no Makefile, no CMake:
 ```text
-void processQueue() {
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx_);
+g++ -std=c++17 -o demo lesson-20-immortal-logger.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <cstdlib>
 
-        cv_.wait(lock, [this]() { return !log_queue_.empty(); });
-
-        std::string msg = log_queue_.front();
-        log_queue_.pop();
-        lock.unlock();
-        
-        std::cout << "[Immortal Thread] Wrote to disk: " << msg << "\n";
+class ImmortalLogger {
+public:
+    ImmortalLogger() {
+        // spawn the thread and DETACH it -- it now lives forever in the
+        // background, completely disconnected from the main thread
+        std::thread(&ImmortalLogger::processQueue, this).detach();
     }
+
+    void log(const std::string& msg) {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+    void processQueue() {
+        // no stop_ variable, no break clause
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+
+            cv_.wait(lock, [this]() { return !log_queue_.empty(); });
+
+            std::string msg = log_queue_.front();
+            log_queue_.pop();
+            lock.unlock();
+
+            std::cout << "[Immortal Thread] Wrote to disk: " << msg << "\n";
+            logs_written_++;
+        }
+    }
+
+    int getLogsWritten() { return logs_written_; }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    int logs_written_ = 0;
+};
+
+int main() {
+    std::cout << "[main] Booting up laptop...\n";
+    ImmortalLogger* logger = new ImmortalLogger();
+
+    std::cout << "[main] User does some work...\n";
+    logger->log("User opened browser");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    logger->log("User watched a video");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    std::cout << "\n[main] Logs safely written to disk: " << logger->getLogsWritten() << "\n\n";
+
+    std::cout << "[main] Pushing a final log right as the battery dies...\n";
+    logger->log("User saved a very important document");
+
+    std::cout << "[main] Laptop battery dies! Hard shutdown!\n";
+    // we exit instantly -- the detached thread is violently killed by the OS
+    std::exit(0);
 }
 ```
 

@@ -57,7 +57,158 @@ std::string msg = std::move(log_queue_.front());  // crash
 
   --------
   THEN THE RUN, ACROSS FIVE CASES
-  experiment/test_timeout_bug.cpp, cv_.wait_for(5s) with no empty-check handler:
+  experiment/test_timeout_bug.cpp, cv_.wait_for(5s) with no empty-check handler. Compile it
+  yourself, no Makefile, no CMake -- it takes a case name as its one argument:
+```text
+g++ -std=c++17 -o demo lesson-25-periodic-flush-three-return-paths.cpp
+./demo case1     -- 1 req + stop, works
+./demo case2     -- 0 req + stop, works
+./demo case3     -- 3 req + stop, works
+./demo case4     -- 4 req, NO stop -- waits 5s, then crashes on front()
+./demo case5     -- 4 req + stop, works
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <fstream>
+
+class BuggyLogger {
+public:
+    BuggyLogger(const char* logfile) {
+        file_ = fopen(logfile, "w");
+        background_writer_ = std::thread(&BuggyLogger::processQueue, this);
+    }
+
+    ~BuggyLogger() {
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        flushPending();
+        if (file_) fclose(file_);
+    }
+
+    void log(const std::string& msg) {
+        std::string formatted = msg + "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (log_queue_.size() >= 10000) return;
+            log_queue_.push(std::move(formatted));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void processQueue() {
+        int iter = 0;
+        while (true) {
+            iter++;
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait_for(lock, std::chrono::seconds(5),
+                         [this]() { return stop_ || !log_queue_.empty(); });
+
+            std::cout << "[B] iter=" << iter
+                      << " stop=" << stop_
+                      << " q=" << log_queue_.size()
+                      << " p=" << pending_.size() << "\n";
+
+            if (stop_ && log_queue_.empty()) {
+                std::cout << "[B] stop+empty flush+break\n";
+                flushPending();
+                break;
+            }
+
+            // BUG: no empty check! falls through to front() on an empty queue
+            std::cout << "[B] front() on qsize=" << log_queue_.size() << "\n";
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+
+            pending_ += msg;
+            if (pending_.size() >= 4096) flushPending();
+        }
+        std::cout << "[B] EXIT after " << iter << " iters\n";
+    }
+
+    void flushPending() {
+        if (file_ && !pending_.empty()) {
+            fprintf(file_, "%s", pending_.c_str());
+            fflush(file_);
+            pending_.clear();
+        }
+    }
+
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+    FILE* file_ = nullptr;
+    std::string pending_;
+};
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "Usage: demo <case1|case2|case3|case4|case5>\n";
+        return 0;
+    }
+    std::string mode = argv[1];
+
+    if (mode == "case1") {
+        std::cout << "=== CASE 1: 1 req + stop (within 5s) ===\n";
+        { BuggyLogger log("c1.log"); log.log("Req 1");
+          std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+        std::ifstream f("c1.log"); int c=0; std::string l;
+        while(std::getline(f,l)) c++; std::cout << "Written: " << c << "\n";
+        std::remove("c1.log");
+    }
+    else if (mode == "case2") {
+        std::cout << "=== CASE 2: 0 req + stop ===\n";
+        { BuggyLogger log("c2.log"); }
+        std::cout << "OK no crash\n";
+        std::remove("c2.log");
+    }
+    else if (mode == "case3") {
+        std::cout << "=== CASE 3: 3 req + stop (within 5s) ===\n";
+        { BuggyLogger log("c3.log");
+          log.log("A"); log.log("B"); log.log("C");
+          std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+        std::ifstream f("c3.log"); int c=0; std::string l;
+        while(std::getline(f,l)) c++; std::cout << "Written: " << c << "\n";
+        std::remove("c3.log");
+    }
+    else if (mode == "case4") {
+        std::cout << "=== CASE 4: 4 req, NO stop (will timeout + crash) ===\n";
+        BuggyLogger log("c4.log");
+        log.log("1"); log.log("2"); log.log("3"); log.log("4");
+        std::cout << "[main] Waiting 10s... consumer will timeout in 5s and crash on front()\n";
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::cout << "[main] SURVIVED (unexpected)\n";
+        std::remove("c4.log");
+    }
+    else if (mode == "case5") {
+        std::cout << "=== CASE 5: 4 req + stop (within 5s) ===\n";
+        { BuggyLogger log("c5.log");
+          log.log("1"); log.log("2"); log.log("3"); log.log("4");
+          std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+        std::ifstream f("c5.log"); int c=0; std::string l;
+        while(std::getline(f,l)) c++; std::cout << "Written: " << c << "\n";
+        std::remove("c5.log");
+    }
+    else {
+        std::cerr << "Unknown case\n";
+        return 1;
+    }
+    return 0;
+}
+```
       case                              what happens                                    result
       1 req + stop (within 5s)         notify wakes, stop_+empty detected               works
       0 req + stop                     stop_ true immediately                           works

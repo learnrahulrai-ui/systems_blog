@@ -22,7 +22,95 @@ if (stop_) {
 ```
 
   experiment/todo4_truncated_shutdown_bug.cpp pushes 5 critical logs rapidly, then triggers a
-  clean shutdown before the slow hard drive can finish writing all five.
+  clean shutdown before the slow hard drive can finish writing all five. Compile it yourself,
+  no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-11-truncated-shutdown-bug.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+
+class BadLogger {
+public:
+    BadLogger() {
+        background_writer_ = std::thread(&BadLogger::processQueue, this);
+    }
+
+    ~BadLogger() {
+        std::cout << "\n[Main Thread] Shutting down. Setting stop_ = true...\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+    }
+
+    void log(const std::string& msg) {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+    void processQueue() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+
+            // the bug: removed && log_queue_.empty()
+            if (stop_) {
+                std::cout << "[Background Thread] stop_ is true! I am exiting immediately without draining the queue!\n";
+                std::cout << "[Background Thread] Logs remaining in queue: " << log_queue_.size() << " (THESE WILL BE LOST FOREVER)\n";
+                break;
+            }
+
+            std::string msg = log_queue_.front();
+            log_queue_.pop();
+            lock.unlock();
+
+            // simulating a slow hard drive write (100ms)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::cout << "[Background Thread] Wrote to disk: " << msg << "\n";
+        }
+    }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+};
+
+int main() {
+    std::cout << "[main] Starting program...\n";
+    {
+        BadLogger logger;
+
+        std::cout << "[main] Server is busy! Pushing 5 critical logs rapidly...\n";
+        for (int i = 1; i <= 5; ++i) {
+            logger.log("Critical Transaction " + std::to_string(i));
+        }
+
+        // give the background thread just enough time to write the first log
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // then immediately trigger a normal server shutdown while the queue is still full
+        std::cout << "[main] Normal server shutdown triggered!\n";
+    }
+    std::cout << "[main] Program ended successfully.\n";
+    return 0;
+}
+```
 
   --------
   THEN THE RUN, NOT A PREDICTION

@@ -18,29 +18,95 @@
 
   --------
   FIRST, FORCE ONE ON PURPOSE
-  An experiment fires a random notify_one while the queue is completely empty, on code that
-  assumes waking up means data arrived:
-
+  experiment/todo4_spurious_wakeup_bug.cpp fires a random notify_one while the queue is
+  completely empty, on code that assumes waking up means data arrived. Compile it yourself, no
+  Makefile, no CMake:
 ```text
+g++ -std=c++17 -o demo lesson-6-spurious-wakeup-crash.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+
+class BadLogger {
+public:
+    BadLogger() {
+        background_writer_ = std::thread(&BadLogger::processQueue, this);
+    }
+
+    ~BadLogger() {
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+
+        if (background_writer_.joinable()) {
+            background_writer_.join();
+        }
+    }
+
+    // A helper to simulate the OS waking our thread randomly for no reason
+    void triggerSpuriousWakeup() {
+        std::cout << "[OS/Kernel] Random Spurious Wakeup sent! (Queue is empty)\n";
+        cv_.notify_one();
+    }
+
     void processQueue() {
         while (true) {
             std::unique_lock<std::mutex> lock(mtx_);
 
             // waits blindly: no while-loop, no predicate
+            std::cout << "[Background Thread] Sleeping blindly...\n";
             cv_.wait(lock);
+            std::cout << "[Background Thread] I am awake!\n";
 
-            // wakes up and assumes there must be data
-            std::string msg = log_queue_.front(); // fatal
+            if (stop_ && log_queue_.empty()) break;
+
+            std::cout << "[Background Thread] I am awake, so there must be data! Reading queue.front()...\n";
+
+            // fatal: the queue is empty
+            std::string msg = log_queue_.front();
             log_queue_.pop();
-            // ...
+
+            lock.unlock();
+            std::cout << "[Background Thread] Wrote data: " << msg << "\n";
         }
     }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+};
+
+int main() {
+    std::cout << "Starting program...\n";
+
+    BadLogger logger;
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // The OS randomly wakes up the thread, even though nobody added a log message!
+    logger.triggerSpuriousWakeup();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    std::cout << "Program ended successfully (You will never see this line).\n";
+    return 0;
+}
 ```
 
   --------
   THEN THE RUN, NOT A PREDICTION
-  experiment/todo4_spurious_wakeup_bug.cpp crashes instantly with exit code 1: a C++ STL debug
-  assertion failure, a segmentation fault.
+  This crashes instantly -- a C++ STL debug assertion failure, a segmentation fault. The exact
+  exit code is compiler and OS dependent; what is constant is the crash itself.
 
   Here is the timeline right before it dies:
 ```text

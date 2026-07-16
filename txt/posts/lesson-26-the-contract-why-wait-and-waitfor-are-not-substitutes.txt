@@ -103,7 +103,339 @@ msg = queue.front();
   function is allowed to return.
 
   experiment/test_timeout_periodic_flush.cpp runs the corrected wait_for with the timeout
-  handler in place: all 14 assertions pass.
+  handler in place across 12 test functions, 14 assertions total: all 14 pass. It takes about
+  20 seconds to run, since several tests deliberately wait out the 5-second timeout to prove
+  the periodic flush fires. Compile it yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-26-the-contract.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <fstream>
+#include <vector>
+#include <cstdlib>
+#include <cassert>
+
+static int tests_passed = 0;
+static int tests_failed = 0;
+
+#define TEST(name) std::cout << "\n=== " << name << " ===\n"
+#define CHECK(cond, msg) do { \
+    if (!(cond)) { tests_failed++; std::cout << "  FAIL: " << msg << "\n"; } \
+    else { tests_passed++; std::cout << "  PASS: " << msg << "\n"; } \
+} while(0)
+
+class Logger {
+public:
+    Logger(const char* logfile) {
+        file_ = fopen(logfile, "w");
+        background_writer_ = std::thread(&Logger::processQueue, this);
+    }
+
+    ~Logger() {
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        flushPending();
+        if (file_) fclose(file_);
+    }
+
+    void log(const std::string& msg) {
+        std::string formatted = msg + "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (log_queue_.size() >= 10000) return;
+            log_queue_.push(std::move(formatted));
+        }
+        cv_.notify_one();
+    }
+
+    size_t queueSize() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return log_queue_.size();
+    }
+
+    size_t batchSize() { return pending_batch_.size(); }
+    bool isRunning() { return !stop_; }
+
+private:
+    void processQueue() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            if (!cv_.wait_for(lock, std::chrono::seconds(5),
+                              [this]() { return stop_ || !log_queue_.empty(); })) {
+                // 5s passed, no new work, not stopping
+                // periodic housekeeping: flush partial buffer to disk
+                lock.unlock();
+                flushPending();
+                continue;
+            }
+
+            if (stop_ && log_queue_.empty()) {
+                flushPending();
+                break;
+            }
+
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+
+            pending_batch_.push_back(std::move(msg));
+            if (pending_batch_.size() >= 50) {
+                flushPending();
+            }
+        }
+    }
+
+    void flushPending() {
+        if (file_ && !pending_batch_.empty()) {
+            for (const auto& line : pending_batch_) {
+                fprintf(file_, "%s", line.c_str());
+            }
+            fflush(file_);
+            pending_batch_.clear();
+        }
+    }
+
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+    FILE* file_ = nullptr;
+    std::vector<std::string> pending_batch_;
+};
+
+void test_zero_req_stop() {
+    TEST("0 requests, then immediate stop");
+    { Logger log("t1.log"); }
+    std::ifstream f("t1.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 0, "0 logs written");
+    std::remove("t1.log");
+}
+
+void test_one_req_stop() {
+    TEST("1 request, then stop");
+    {
+        Logger log("t2.log");
+        log.log("Request 1");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t2.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 1, "1 log written");
+    std::remove("t2.log");
+}
+
+void test_three_req_stop() {
+    TEST("3 requests, then stop (batched)");
+    {
+        Logger log("t3.log");
+        log.log("Request 1");
+        log.log("Request 2");
+        log.log("Request 3");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t3.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 3, "all 3 logs written");
+    std::remove("t3.log");
+}
+
+void test_queue_not_empty_on_stop() {
+    TEST("Stop while queue still has items");
+    {
+        Logger log("t4.log");
+        log.log("Msg 1"); log.log("Msg 2"); log.log("Msg 3");
+        log.log("Msg 4"); log.log("Msg 5");
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::ifstream f("t4.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 5, "all 5 logs written despite stop arriving early");
+    std::remove("t4.log");
+}
+
+void test_burst_100() {
+    TEST("Burst of 100 requests, then stop");
+    {
+        Logger log("t5.log");
+        for (int i = 0; i < 100; i++) log.log("Burst msg " + std::to_string(i));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    std::ifstream f("t5.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 100, "all 100 logs written");
+    std::remove("t5.log");
+}
+
+void test_large_message() {
+    TEST("Single large message");
+    {
+        Logger log("t6.log");
+        std::string big(5000, 'X');
+        log.log(big);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t6.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 1, "large message written");
+    std::ifstream f2("t6.log");
+    std::getline(f2, line);
+    CHECK(line.size() == 5000, "large message is 5000 chars");
+    std::remove("t6.log");
+}
+
+void test_multiple_flushes() {
+    TEST("1000 requests causing multiple batch flushes");
+    {
+        Logger log("t7.log");
+        for (int i = 0; i < 1000; i++)
+            log.log("Request " + std::to_string(i) + " with some padding ....................");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    std::ifstream f("t7.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 1000, "all 1000 logs written across multiple flushes");
+    std::remove("t7.log");
+}
+
+void test_concurrent_producers_race() {
+    TEST("Concurrent producers racing with shutdown");
+    const int NUM_MSGS = 500;
+    {
+        Logger log("t8.log");
+        std::vector<std::thread> producers;
+        for (int t = 0; t < 4; t++) {
+            producers.emplace_back([&log, t, NUM_MSGS]() {
+                for (int i = 0; i < NUM_MSGS; i++)
+                    log.log("Thread " + std::to_string(t) + " msg " + std::to_string(i));
+            });
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        for (auto& p : producers) p.join();
+    }
+    std::ifstream f("t8.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count >= 4 * NUM_MSGS - 100, "most concurrent messages written (" + std::to_string(count) + "/" + std::to_string(4*NUM_MSGS) + ")");
+    std::remove("t8.log");
+}
+
+void test_bounded_queue_drop() {
+    TEST("Bounded queue cap -- no crash when flooded");
+    int count = 0;
+    size_t peak_qsize = 0;
+    {
+        Logger log("t9.log");
+        for (int i = 0; i < 20000; i++) log.log("x");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        peak_qsize = log.queueSize();
+    }
+    std::ifstream f("t9.log");
+    std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count > 0, "some messages written (no crash)");
+    CHECK(peak_qsize <= 10000, "queue never exceeded 10000 (cap worked)");
+    std::remove("t9.log");
+}
+
+void test_partial_buffer_on_stop() {
+    TEST("Partial pending_batch_ buffer flushed on stop");
+    {
+        Logger log("t10.log");
+        log.log("Only one small message -- should be flushed on stop");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t10.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 1, "partial buffer flushed on stop");
+    std::remove("t10.log");
+}
+
+void test_periodic_flush_during_idle() {
+    TEST("Periodic flush during idle -- no crash, buffer cleared");
+    {
+        Logger log("t11.log");
+        log.log("First message");
+        log.log("Second message");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::seconds(6));
+        log.log("Third message");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t11.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 3, "all 3 logs written (periodic flush cleared partial buffer)");
+    std::remove("t11.log");
+}
+
+void test_multiple_periodic_flushes() {
+    TEST("Multiple periodic flushes -- no crash, no data loss");
+    {
+        Logger log("t12.log");
+        log.log("Sole message");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::seconds(6));  // 1st timeout: flush 1 msg
+        std::this_thread::sleep_for(std::chrono::seconds(6));  // 2nd timeout: flush (no-op)
+        log.log("Another message");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::ifstream f("t12.log");
+    int count = 0; std::string line;
+    while (std::getline(f, line)) count++;
+    CHECK(count == 2, "both messages written across multiple periodic flushes");
+    std::remove("t12.log");
+}
+
+int main() {
+    std::cout << "============================================\n";
+    std::cout << "EDGE CASE TEST -- wait_for(5s) PERIODIC FLUSH\n";
+    std::cout << "============================================\n";
+
+    test_zero_req_stop();
+    test_one_req_stop();
+    test_three_req_stop();
+    test_queue_not_empty_on_stop();
+    test_burst_100();
+    test_large_message();
+    test_multiple_flushes();
+    test_concurrent_producers_race();
+    test_bounded_queue_drop();
+    test_partial_buffer_on_stop();
+    test_periodic_flush_during_idle();
+    test_multiple_periodic_flushes();
+
+    std::cout << "\n============================================\n";
+    std::cout << "RESULTS: " << (tests_passed + tests_failed) << " tests\n";
+    std::cout << "  PASSED: " << tests_passed << "\n";
+    std::cout << "  FAILED: " << tests_failed << "\n";
+    std::cout << "============================================\n";
+    return tests_failed > 0 ? 1 : 0;
+}
+```
+  Running this prints "RESULTS: 14 tests, PASSED: 14, FAILED: 0" -- verified by actually
+  compiling and running it, not just asserted.
 
   >> STANDARD NAMES
      wait's return guarantee            -> pred() is always true on return

@@ -14,7 +14,98 @@
   Lesson 18 predicted the eternal-server OOM failure from substitution alone. Here is the same
   claim with no substitution, just a real run: experiment/todo4_missing_consumer_oom_bug.cpp
   removes !log_queue_.empty() from the lambda, leaving only [this](){ return stop_; }, boots an
-  eternal server, and fires 1,000,000 requests at it without ever shutting down.
+  eternal server, and fires 1,000,000 requests at it without ever shutting down. Compile it
+  yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-19-out-of-memory-oom-proof.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <cstdlib> // for std::exit
+
+class BadLogger {
+public:
+    BadLogger() {
+        background_writer_ = std::thread(&BadLogger::processQueue, this);
+    }
+
+    void log(const std::string& msg) {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+    void processQueue() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+
+            // the bug: removed !log_queue_.empty() from the lambda
+            cv_.wait(lock, [this]() { return stop_; });
+
+            if (stop_ && log_queue_.empty()) break;
+
+            std::string msg = log_queue_.front();
+            log_queue_.pop();
+            lock.unlock();
+
+            logs_written_++;
+        }
+    }
+
+    size_t getQueueSize() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return log_queue_.size();
+    }
+
+    int getLogsWritten() {
+        return logs_written_;
+    }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false; // in an eternal server, this never changes to true
+    int logs_written_ = 0;
+};
+
+int main() {
+    std::cout << "[main] Starting Eternal Server...\n";
+    BadLogger* logger = new BadLogger();
+
+    std::cout << "[main] Simulating 1,000,000 user requests...\n";
+    for (int i = 0; i < 1000000; ++i) {
+        logger->log("This is a very important log message detailing a user transaction.");
+    }
+
+    std::cout << "[main] Finished pushing requests.\n";
+    std::cout << "[main] Sleeping for 2 full seconds to give the background thread plenty of time to write...\n";
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    std::cout << "\n=========================================\n";
+    std::cout << "RUNTIME SNAPSHOT:\n";
+    std::cout << "Logs Written to Disk: " << logger->getLogsWritten() << "\n";
+    std::cout << "Logs Trapped in RAM:  " << logger->getQueueSize() << "\n";
+    std::cout << "=========================================\n\n";
+
+    if (logger->getLogsWritten() == 0 && logger->getQueueSize() == 1000000) {
+        std::cout << "BUG CONFIRMED: Missing Consumer! Thread never woke up. OOM imminent.\n";
+    }
+
+    // forcefully exit the program, skipping the destructor, to simulate an eternal server
+    std::exit(0);
+}
+```
 
   --------
   THEN THE RUN, NOT A PREDICTION

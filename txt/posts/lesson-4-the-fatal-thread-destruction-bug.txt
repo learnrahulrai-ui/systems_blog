@@ -20,12 +20,19 @@
   A standalone experiment, experiment/todo1_shutdown_bug.cpp, mimics the Logger exactly, minus
   one thing: the destructor never signals its background thread to stop.
 
-  Here is the exact code:
+  Here is the exact code -- compile it and watch it abort yourself, no Makefile, no CMake:
 ```text
+g++ -std=c++17 -o demo lesson-4-fatal-thread-destruction-bug.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <chrono>
+
 class BadLogger {
 public:
     BadLogger() {
-        // We start the background thread
         background_writer_ = std::thread(&BadLogger::processQueue, this);
     }
 
@@ -35,9 +42,14 @@ public:
         std::cout << "Destructing BadLogger...\n";
     }
 
+    void processQueue() {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+
 private:
     std::thread background_writer_;
-    // ...
 };
 
 int main() {
@@ -50,6 +62,10 @@ int main() {
     return 0;
 }
 ```
+  Running this prints "Starting program..." then aborts: "terminate called without an active
+  exception", a non-zero exit, and the final line never appears. The exact exit code depends on
+  your compiler and OS -- what is constant across all of them is the crash itself and the rule
+  that causes it.
 
   --------
   THEN THE RUN, NOT A PREDICTION

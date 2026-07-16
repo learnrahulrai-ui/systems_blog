@@ -18,20 +18,128 @@
 
   --------
   THEN THE TRACE
-  experiment/test_stop_no_log.cpp:
+  experiment/test_stop_no_log.cpp. Compile it yourself, no Makefile, no CMake:
 ```text
+g++ -std=c++17 -o demo lesson-24-stop-before-any-log.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+
+class Logger {
+public:
+    Logger() {
+        file_ = fopen("test_stop_before_first_log.log", "w");
+        background_writer_ = std::thread(&Logger::processQueue, this);
+    }
+
+    ~Logger() {
+        std::cout << "[~Logger] Shutdown started\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        flushPending();
+        if (file_) fclose(file_);
+        std::cout << "[~Logger] Shutdown done\n";
+    }
+
+    void log(const std::string& msg) {
+        std::string formatted = msg + "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(std::move(formatted));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void processQueue() {
+        int iteration = 0;
+        while (true) {
+            iteration++;
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+
+            std::cout << "[processQueue] Iteration " << iteration
+                      << " -- stop_=" << stop_
+                      << " queue_size=" << log_queue_.size()
+                      << " pending_size=" << pending_.size() << "\n";
+
+            if (stop_ && log_queue_.empty()) {
+                std::cout << "[processQueue] stop && empty -> ";
+                if (pending_.empty())
+                    std::cout << "nothing to flush (correct!)\n";
+                else
+                    std::cout << "flushing \"" << pending_ << "\"\n";
+                flushPending();
+                break;
+            }
+
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+            pending_ += msg;
+        }
+        std::cout << "[processQueue] Exited loop after " << iteration << " iterations\n";
+    }
+
+    void flushPending() {
+        if (file_ && !pending_.empty()) {
+            std::cout << "[flushPending] Actually wrote: \"" << pending_ << "\"\n";
+            fprintf(file_, "%s", pending_.c_str());
+            fflush(file_);
+            pending_.clear();
+        } else {
+            std::cout << "[flushPending] Nothing to flush (correct!)\n";
+        }
+    }
+
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+    FILE* file_ = nullptr;
+    std::string pending_;
+};
+
+int main() {
+    std::cout << "[main] === TEST: Stop before any log comes ===\n";
+    std::cout << "[main] Server started. No requests yet.\n";
+    std::cout << "[main] Someone presses stop immediately!\n";
+
+    {
+        Logger logger;
+        // no log() calls at all -- shutdown happens instantly
+    }
+
+    std::cout << "[main] === PASS: Clean shutdown with no data ===\n";
+    std::remove("test_stop_before_first_log.log");
+    return 0;
+}
+```
+  Running this prints:
+```text
+[main] === TEST: Stop before any log comes ===
 [main] Server started. No requests yet.
 [main] Someone presses stop immediately!
-
-[~Logger] stop_=true, notify_one
-
+[~Logger] Shutdown started
 [processQueue] Iteration 1 -- stop_=1 queue_size=0 pending_size=0
 [processQueue] stop && empty -> nothing to flush (correct!)
 [flushPending] Nothing to flush (correct!)
 [processQueue] Exited loop after 1 iterations
-
 [flushPending] Nothing to flush (correct!)
 [~Logger] Shutdown done
+[main] === PASS: Clean shutdown with no data ===
 ```
 
   --------

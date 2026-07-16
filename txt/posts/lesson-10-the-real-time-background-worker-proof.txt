@@ -20,7 +20,97 @@
 cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
 ```
   and runs this sequence in main: push "Log 1", sleep a full second, push "Log 2", sleep a
-  full second, then let the destructor run.
+  full second, then let the destructor run. Compile it yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-10-real-time-background-worker-proof.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+
+class RealtimeLogger {
+public:
+    RealtimeLogger() {
+        std::cout << "[Main Thread] Constructor called! Spawning Background Thread...\n";
+        background_writer_ = std::thread(&RealtimeLogger::processQueue, this);
+    }
+
+    ~RealtimeLogger() {
+        std::cout << "\n[Main Thread] Destructor called! Setting stop_ = true...\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        std::cout << "[Main Thread] Destructor finished.\n";
+    }
+
+    void log(const std::string& msg) {
+        std::cout << "[Main Thread] Pushing to queue: " << msg << "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+    void processQueue() {
+        std::cout << "[Background Thread] processQueue() started! Entering while(true) loop...\n";
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+
+            cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+
+            if (stop_ && log_queue_.empty()) {
+                std::cout << "[Background Thread] Queue is empty and stop_ is true. Breaking out of loop!\n";
+                break;
+            }
+
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+
+            std::cout << "[Background Thread] ---> DOING REAL WORK: Wrote '" << msg << "' to disk!\n";
+        }
+        std::cout << "[Background Thread] processQueue() function has officially ended.\n";
+    }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+};
+
+int main() {
+    std::cout << "[main] Program started.\n\n";
+    {
+        RealtimeLogger logger;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        logger.log("Log 1: User Logged In");
+        std::cout << "[main] Sleeping for 1 full second. Watch the background thread work while I sleep!\n";
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        logger.log("Log 2: User Clicked Button");
+        std::cout << "[main] Sleeping for another 1 second...\n";
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        std::cout << "[main] Ending scope. Destructor will NOW be called.\n";
+    }
+    std::cout << "[main] Program ended successfully.\n";
+    return 0;
+}
+```
 
   --------
   THEN THE RUN, WATCH HOW IT INTERLEAVES

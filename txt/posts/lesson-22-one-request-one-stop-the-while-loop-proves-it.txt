@@ -74,7 +74,124 @@ processQueue() -- was sleeping on cv_.wait
 
   --------
   THEN THE RUN, NOT A PREDICTION
-  experiment/test_one_req_one_stop.cpp:
+  experiment/test_one_req_one_stop.cpp. Compile it yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-22-one-request-one-stop.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+#include <fstream>
+
+class Logger {
+public:
+    Logger() {
+        file_ = fopen("test_one_req.log", "w");
+        background_writer_ = std::thread(&Logger::processQueue, this);
+    }
+
+    ~Logger() {
+        std::cout << "[~Logger] Shutdown started\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (background_writer_.joinable()) background_writer_.join();
+        flushPending();
+        if (file_) fclose(file_);
+        std::cout << "[~Logger] Shutdown done\n";
+    }
+
+    void log(const std::string& msg) {
+        std::string formatted = msg + "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(std::move(formatted));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void processQueue() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this]() { return stop_ || !log_queue_.empty(); });
+
+            if (stop_ && log_queue_.empty()) {
+                flushPending();
+                break;
+            }
+
+            std::string msg = std::move(log_queue_.front());
+            log_queue_.pop();
+            lock.unlock();
+
+            pending_ += msg;
+            if (pending_.size() >= 4096) flushPending();
+        }
+        std::cout << "[processQueue] Exited loop\n";
+    }
+
+    void flushPending() {
+        if (file_ && !pending_.empty()) {
+            std::cout << "[flushPending] Writing to disk: \"" << pending_.substr(0, pending_.size()-1) << "\"\n";
+            fprintf(file_, "%s", pending_.c_str());
+            fflush(file_);
+            pending_.clear();
+        } else {
+            std::cout << "[flushPending] Nothing to flush\n";
+        }
+    }
+
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+    FILE* file_ = nullptr;
+    std::string pending_;
+};
+
+int main() {
+    std::cout << "[main] === TEST: One request, one stop ===\n";
+    {
+        Logger logger;
+
+        std::cout << "[main] 1st second: request arrives\n";
+        logger.log("Request 1: User logged in");
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        std::cout << "[main] Shutdown signal received\n";
+    }
+
+    std::cout << "\n[main] === VERIFYING LOG FILE ===\n";
+    std::ifstream log_file("test_one_req.log");
+    std::string line;
+    int count = 0;
+    while (std::getline(log_file, line)) {
+        std::cout << "  Line " << ++count << ": \"" << line << "\"\n";
+    }
+    log_file.close();
+
+    if (count == 1) {
+        std::cout << "[main] PASS: Exactly 1 log written\n";
+    } else {
+        std::cout << "[main] FAIL: Expected 1 log, got " << count << "\n";
+    }
+
+    std::remove("test_one_req.log");
+    return count == 1 ? 0 : 1;
+}
+```
+  Running this prints:
 ```text
 [main] === TEST: One request, one stop ===
 [main] 1st second: request arrives
@@ -82,12 +199,16 @@ processQueue() -- was sleeping on cv_.wait
 [~Logger] Shutdown started
 [flushPending] Writing to disk: "Request 1: User logged in"
 [processQueue] Exited loop
+[flushPending] Nothing to flush
 [~Logger] Shutdown done
 
 [main] === VERIFYING LOG FILE ===
   Line 1: "Request 1: User logged in"
 [main] PASS: Exactly 1 log written
 ```
+  That extra "Nothing to flush" line is the destructor's own flushPending() call running as a
+  safety net right after processQueue already flushed and exited -- it finds pending_ already
+  empty, and says so.
 
   --------
   SO WHY THIS SHAPE WORKS

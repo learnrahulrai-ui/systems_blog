@@ -28,7 +28,11 @@
 ```
 
   experiment/todo1_locked_join_bug.cpp isolates exactly what happens mechanically when this
-  runs.
+  runs. Compile it yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-5-locked-join-deadlock.cpp
+./demo
+```
 
   --------
   THE RUN FREEZES, IT DOES NOT CRASH

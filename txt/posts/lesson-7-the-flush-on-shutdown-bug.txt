@@ -21,6 +21,97 @@ cv_.wait(lock, [this]() { return stop_; });
 
   experiment/todo4_stop_only_bug.cpp runs that exact predicate while the main thread pushes
   normal traffic into the queue and calls notify_one, server running, nothing shutting down.
+  Compile it yourself, no Makefile, no CMake:
+```text
+g++ -std=c++17 -o demo lesson-7-flush-on-shutdown-bug.cpp
+./demo
+```
+```text
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+#include <string>
+
+class BadLogger {
+public:
+    BadLogger() {
+        background_writer_ = std::thread(&BadLogger::processQueue, this);
+    }
+
+    ~BadLogger() {
+        std::cout << "[Main Thread] Shutting down server. Setting stop_ = true...\n";
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+
+        if (background_writer_.joinable()) {
+            background_writer_.join();
+        }
+    }
+
+    void log(const std::string& msg) {
+        std::cout << "[Main Thread] User hit endpoint! Logging message: " << msg << "\n";
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            log_queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+    void processQueue() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+
+            // we only wake up if stop_ == true
+            cv_.wait(lock, [this]() { return stop_; });
+
+            if (stop_ && log_queue_.empty()) break;
+
+            std::string msg = log_queue_.front();
+            log_queue_.pop();
+
+            lock.unlock();
+            std::cout << "[Background Thread] Finally writing to disk: " << msg << "\n";
+        }
+    }
+
+private:
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::queue<std::string> log_queue_;
+    std::thread background_writer_;
+    bool stop_ = false;
+};
+
+int main() {
+    std::cout << "Starting program...\n";
+    {
+        BadLogger logger;
+
+        logger.log("Request 1");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        logger.log("Request 2");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        logger.log("Request 3");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        std::cout << "[Main Thread] Notice how the Background Thread is doing absolutely nothing?\n";
+        std::cout << "[Main Thread] The queue is just building up in memory...\n\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    } // server shuts down here, triggering ~BadLogger()
+
+    std::cout << "Program ended successfully.\n";
+    return 0;
+}
+```
 
   --------
   THEN THE RUN, NOT A PREDICTION
