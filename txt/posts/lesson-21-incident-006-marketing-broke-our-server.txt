@@ -15,7 +15,7 @@
 
   --------
   WE RUN THE CODE STANDALONE
-  Yesterday, our endpoint was fast and everyone was happy:
+  Yesterday, our endpoint answered in 2 ms and everyone was happy:
 ```text
 Alice  →  Browser  →  GET /hello  →  200 OK  (2 ms)
 ```

@@ -11,7 +11,7 @@
 
 
 
-  I built a C++ test framework that compiled all 8 logic permutations and executed 10 edge-case test cases against each version, capturing the exact point of failure using a timeout supervisor.
+  I built a C++ test harness that compiled all 8 logic permutations and executed 10 edge-case test cases against each version, capturing the exact point of failure using a timeout supervisor.
 
   --------
   V1: PERFECT PATTERN (WAIT(STOP||!EMPTY), IF(STOP&&EMPTY) BREAK;)

@@ -1,0 +1,720 @@
+@title The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- THE FULL JOURNEY
+  The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way
+  ============================================================================================
+
+
+  A call center has two people on a line: the support agent and the customer. This
+  entire project is those two people, written as one C++ file, rewritten nine times:
+  v1.cpp through v9.cpp. One binary. argv[1] picks the role -- "support" answers,
+  "consumer" calls in. No threads. No signals. No select, no poll, no epoll. Ninety
+  percent of everything below is the same single file, edited, recompiled with
+  g++ v4.cpp -o v4.exe, and run again in two terminals, over and over, until the
+  operating system stopped cooperating in a new way. Every number is copied from
+  the terminal. Every stage is in the git log of the minicom folder.
+
+```
+  Terminal 1                              Terminal 2
+  ./v4.exe support                        ./v4.exe consumer
+  +-------------------+                   +-------------------+
+  |   the agent       | <----- ??? -----> |   the customer    |
+  +-------------------+                   +-------------------+
+        the ??? is the whole story: first nothing, then a file, then TCP
+```
+
+  ==============================================================================================
+
+  V1 -- TWO PROCESSES THAT CANNOT TALK
+
+  ==============================================================================================
+
+  v1 does one thing: route argv[1] to support() or consumer(). The first attempt
+  did not compile:
+
+      v1.cpp:25:36: error: expected ')' before '{' token
+         25 |     if ( strcmp(argv[1], "support") {
+
+  Fixing the parenthesis exposed the real trap. strcmp() returns the numeric
+  difference between two strings -- 0 on a match:
+
+```text
+  strcmp("support", "support")  ->  0        (match)
+  strcmp("support", "other")    ->  nonzero  (different)
+```
+
+  A bare if (strcmp(argv[1], "support")) treats that 0 as false, so the branch
+  runs only when the strings do NOT match. Passing "support" printed the consumer
+  greeting; passing "consumer" printed the support greeting -- exactly backwards.
+  With == 0 spelled out:
+
+      ./v1.exe support   -> hello; this is support
+      ./v1.exe consumer  -> hello; this is consumer
+
+  Two processes, two correct sentences, zero bytes exchanged between them.
+
+  ==============================================================================================
+
+  V2 AND V3 -- A FILE AS THE PHONE LINE
+
+  ==============================================================================================
+
+  In the 1990s the most basic way for two processes to talk was a file. Support
+  writes chat.txt; consumer reads it.
+
+```
+  support                                     consumer
+  +-----------+    write()    +----------+    read()    +-----------+
+  | buffer    | ------------> | chat.txt | <----------- | buffer    |
+  +-----------+ open(O_WRONLY)+----------+ open(O_RDONLY)+----------+
+```
+
+  The file era planted four traps, each caught by a real compile error or a real
+  question with a wrong first answer:
+
+  One: open("chat.txt") with no flags cannot create or write a file -- the mode
+  flags O_WRONLY | O_CREAT plus a permission number (0644) are mandatory. Two:
+  strcpy() takes two arguments; the three-argument form belongs to strncpy().
+  Three: without O_TRUNC in the flags, writing a shorter message over a longer
+  file overwrites only the first bytes and leaves the old tail glued on -- writing
+  "bye" over "hello consumer" leaves the file reading "byelo consumer". Four:
+  running the consumer before support ever ran makes open(O_RDONLY) return -1
+  with ENOENT, because nothing guarantees which process wins the race.
+
+  Reading it back added two more. A 256-byte buffer has valid indices 0 through
+  255, so read() must be asked for sizeof(buffer) - 1 bytes -- reading a full 256
+  and then writing buffer[256] = '\0' lands one byte outside the array. And a
+  single read() call of 255 bytes cannot return a 10 MB file; reading big files
+  takes repeated calls until read() returns 0 at end of file.
+
+  Then the question that ended the file era: if support and consumer are both
+  running and want a live conversation, what does the consumer do while waiting
+  for new bytes? A file has no way to announce a change. The only move is to ask
+  again:
+
+```
+  consumer waiting on a file:
+
+  ask read()  -> nothing new  -> ask again  -> nothing new  -> ask again ...
+  millions of asks per second, one CPU core pinned at 100%, zero work done
+```
+
+  That spinning is polling. And if both sides ever write the same file in the
+  same millisecond, the messages interleave into garbage -- a file gives no
+  locking and no ordering. A socket fixes exactly this: read() on a socket can
+  park the calling thread inside the kernel, and the kernel wakes it only when
+  bytes actually arrive.
+
+  ==============================================================================================
+
+  V4 -- THE SOCKET REPLACES THE FILE
+
+  ==============================================================================================
+
+  Same file, same two roles, but the file descriptor now comes from
+  socket(AF_INET, SOCK_STREAM, 0) instead of open(). Support binds port 8080,
+  listens, accepts. Consumer connects, reads.
+
+```
+  support                                     consumer
+  socket()                                    socket()
+  bind(8080)     <------- TCP -------->       connect()
+  listen()                                    read()
+  accept()
+  write("hello consumer", 14)
+```
+
+  bind() takes the fd, a pointer to the address struct cast to (struct sockaddr*),
+  and the struct size. The cast is C's 1990s polymorphism: bind() serves IPv4,
+  IPv6, and Unix sockets, so it takes the generic base struct and reads the first
+  bytes (sin_family) to know what it really got. First run across two terminals:
+
+      Support is waiting for a connection...
+      hello consumer
+
+  Two processes exchanged bytes over TCP. Everything after this point is the
+  operating system pushing back.
+
+  ==============================================================================================
+
+  WALL 1 -- THE PORT THAT WOULD NOT DIE (EADDRINUSE)
+
+  ==============================================================================================
+
+```
+           [ OS Kernel ]
+          (port 8080 held
+           in TIME_WAIT)
+                ^
+                | blocked
+    +-----------------------+
+    |      support          |
+    | 1. socket()           |
+    | 2. setsockopt(...)    |  <-- SO_REUSEADDR rescues the port
+    | 3. bind()             |
+    +-----------------------+
+```
+
+  When a server's connection closes, the kernel holds the port in a state called
+  TIME_WAIT for minutes, to catch delayed packets from the dead connection.
+  On Linux, restarting the server inside that window makes bind() fail:
+
+      bind failed: Address already in use
+
+  The fix is one call before bind(): setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, ...).
+  The Linux socket(7) manual spells out what it does and does not allow: it lets
+  bind() take a port whose old sockets are in TIME_WAIT, but still refuses if
+  another process is actively listening.
+
+  The Windows twist, reproduced on this machine: restarting after a crash worked
+  WITHOUT the flag -- Windows quietly allows rebinding over TIME_WAIT. What did
+  fail was two live servers at once: running ./v4.exe support in two terminals
+  simultaneously produced the EADDRINUSE crash in terminal two. Windows chose
+  convenience in the 90s, later recognized the port-stealing risk, and added a
+  separate flag (SO_EXCLUSIVEADDRUSE) rather than break old programs. Code for
+  the Linux behaviour anyway; production runs on Linux.
+
+  ==============================================================================================
+
+  WALL 2 -- THE GHOST IN THE QUEUE (ECONNABORTED)
+
+  ==============================================================================================
+
+  The TCP handshake is not performed by accept(). The kernel completes it in the
+  background the moment the consumer calls connect(); accept() only dequeues a
+  finished connection. That gap is where the ghost lives.
+
+```
+  support: sleep(10) before accept()          consumer
+       |                                          |
+       |   kernel completes handshake  <----  connect()
+       |   connection waits in queue            |
+       |                                     Ctrl+C  (consumer dies)
+       v
+  accept() wakes up and grabs... a corpse
+```
+
+  Reproduced with a sleep(10) planted before accept(): start support, immediately
+  start a consumer, kill it with Ctrl+C, and wait. What happens next depends on
+  the socket mode, and both were run:
+
+  Blocking accept() on Windows/Cygwin did not return -1. It resurrected the dead
+  connection and handed back a valid-looking fd:
+
+      Awake! Calling blocking accept() now...
+      accept() returned FD: 4
+      write() returned: 14 (If -1, the client was already dead!)
+
+  write() returned 14 because a Ctrl+C teardown sends FIN -- a polite "I am done
+  sending", which still legally allows data toward the dead side. The first
+  write() lands in the kernel's send buffer and reports success; the bytes are
+  discarded moments later when the kernel learns the peer is gone. To make
+  write() itself fail, the consumer must die violently -- an RST instead of a
+  FIN. Forcing that took five lines in the consumer before close():
+
+```text
+  struct linger sl;
+  sl.l_onoff  = 1;
+  sl.l_linger = 0;
+  setsockopt(client_fd, SOL_SOCKET, SO_LINGER, (const char*)&sl, sizeof(sl));
+  close(client_fd);   // fires RST instead of FIN
+```
+
+  Rerunning the ghost with the RST consumer:
+
+      Consumer sending brutal RST (Ctrl+C simulation) and dying...
+      Support is waiting for a connection...
+      Accepted client on fd: 4
+      accept passed ; but write failed
+
+  With O_NONBLOCK set on the listening socket instead, accept() refuses to wait
+  at all: an empty queue or a dead entry returns -1 immediately. And that exposes
+  the silent-death bug: with no check on accept()'s return, the code calls
+  write(-1, ...), the kernel answers EBADF, nothing prints, and the process walks
+  off the end of main() -- which looks exactly like a crash. Every accept() needs
+  if (client_fd == -1).
+
+  ==============================================================================================
+
+  WALL 3 -- THE QUEUE HAS A DOOR (BACKLOG AND ECONNREFUSED)
+
+  ==============================================================================================
+
+  listen(fd, N) sets how many completed handshakes the kernel will hold while the
+  program is busy. The number was probed live: sleep(10) after listen(), then
+  fire consumers in parallel from a second terminal:
+
+```text
+  for i in {1..5}; do ./v4.exe consumer & done
+```
+
+      connect failed: Connection refused
+      connect failed: Connection refused
+      hello consumer
+      hello consumer
+      hello consumer
+
+  With listen(fd, 3): three queued, two refused. With listen(fd, 1): two queued,
+  eight of ten refused. With listen(fd, 2): three queued. With listen(fd, 10) and
+  thirty consumers: ten queued, twenty refused. The kernel kept adding a small
+  fudge factor to the number, and the POSIX manual says why it is allowed to:
+
+      The backlog argument provides a hint to the implementation which the
+      implementation shall use to limit the number of outstanding connections
+      in the socket's listen queue.
+
+  A hint, not a contract. And the refusal happens entirely inside the kernel:
+  the arriving SYN meets a full queue and gets an RST back before the C++ code
+  ever runs. accept() never sees the rejected clients, so the server logs
+  nothing while the kernel turns customers away at the door.
+
+```
+  [consumer] --SYN--> [server kernel]  queue full?  --RST--> "Connection refused"
+                                       queue open?  --handshake--> waits for accept()
+```
+
+  ==============================================================================================
+
+  WALL 4 -- THE TIME_WAIT MORGUE, MEASURED
+
+  ==============================================================================================
+
+  What happens when one server serves a thousand short connections and closes
+  each one? Each close() sends FIN and parks the dead socket in TIME_WAIT.
+  Fired ~1000 consumers, then counted with netstat:
+
+      Sockets hoarded in TIME_WAIT: 1159
+
+  Ninety seconds later, counted again:
+
+      Sockets hoarded in TIME_WAIT: 1167
+
+  Still there. TIME_WAIT lasts two times the MSL (Maximum Segment Lifetime, the
+  longest a packet may live in the network); with Windows' MSL of 120 seconds
+  that is 240 seconds. A timer was set for the remainder, then netstat ran once
+  more:
+
+      Sockets hoarded in TIME_WAIT: 0
+
+  The kernel released every socket only after the full 240 seconds. Then the
+  same barrage with SO_LINGER(1, 0) on the server side -- every close() fires an
+  RST, which skips TIME_WAIT entirely -- and after 100 consumers:
+
+      Sockets hoarded in TIME_WAIT: 0
+
+  This is the HTTP/1.0 story. Nineties web servers closed a TCP connection after
+  every single file, absorbed the TIME_WAIT penalty on each, and collapsed when
+  all 65,535 ports were morgued at once. SO_LINGER-zero was the survival hack;
+  HTTP/1.1 keep-alive fixed the cause by reusing one connection.
+
+  ==============================================================================================
+
+  WALL 5 -- THE CLOSE_WAIT ZOMBIES AND THE FD CEILING (EMFILE)
+
+  ==============================================================================================
+
+  Opposite experiment: consumers close cleanly, but the server never calls
+  close(client_fd) -- one commented-out line. Each consumer's FIN arrives, the
+  kernel ACKs it, and the server's side enters CLOSE_WAIT, waiting forever for a
+  close() that never comes. Every zombie holds one file descriptor. 5000
+  consumers later:
+
+      Accepted client on fd: 2048
+      Accepted client on fd: 2049
+      Accepted client on fd: 2050
+
+      BOOM! The OS refused to give us another file descriptor!
+      accept failed: No buffer space available
+
+  The Microsoft C runtime caps a process at 2048 descriptors. The server leaked
+  its way to the ceiling and then accept() failed forever -- no crash, no
+  message, just a server that can never take another call. The same missing
+  close() also produced the massacre run: 1000 consumers against a backlog of
+  10 and a single accept() --
+
+      990  connect failed: Connection refused     (kernel door, queue full)
+        9  Read failed: Software caused connection abort   (orphaned in queue
+                                                            when the server exited)
+        1  hello consumer                          (the sole winner)
+
+  One missing line, three different failure messages, distributed across a
+  thousand victims who each did everything right.
+
+  ==============================================================================================
+
+  WALL 6 -- THE LIMIT WINDOWS IGNORED (setrlimit UNDER THE DEBUGGER)
+
+  ==============================================================================================
+
+  To trigger EMFILE cheaply, the plan was setrlimit(RLIMIT_NOFILE, {5, 5}) --
+  cap the process at five descriptors so the second client dies. Windows ignored
+  it: accept() kept handing out fd 5, 6, 7. The proof of where the request died
+  came from cdb, the Windows debugger, with a breakpoint on cygwin1!setrlimit:
+
+      rcx=0000000000000005 rdx=00000000ffffcbb0
+      00000000`ffffcbb0  00000000`00000005 00000000`00000005
+
+  The first register holds RLIMIT_NOFILE (which compiles to the integer 5); the
+  second points at the struct on the stack, and dumping those 16 bytes shows the
+  two 64-bit fields: soft limit 5, hard limit 5. The struct crossed into
+  cygwin1.dll intact. It just never went further, because sockets do not live in
+  Cygwin's POSIX fd table:
+
+```
+  [ your C++ accept() ]
+        |
+  [ cygwin1.dll ]      POSIX translation layer -- honors setrlimit for files
+        |
+  [ ws2_32.dll ]       Windows Sockets 2 API
+        |
+  [ mswsock.dll ]      Microsoft socket provider
+        |
+  [ afd.sys ]          kernel driver; allocates sockets from kernel memory
+                       (the non-paged pool) -- never consults POSIX limits
+```
+
+  cdb also caught the DLLs loading at the moment of accept(): ws2_32.dll and
+  mswsock.dll appear right before the breakpoint on cygwin1!accept. A POSIX call
+  on Windows is a costume; the kernel underneath plays by its own rules.
+
+  ==============================================================================================
+
+  WALL 7 -- THE CONNECT BLACK HOLE (21 SECONDS, COUNTED)
+
+  ==============================================================================================
+
+  The consumer's turn to suffer. connect() to an address that silently drops
+  packets does not fail -- it freezes. Measured with std::chrono around a single
+  blocking connect() to 1.1.1.1 port 81 (Cloudflare answers DNS on 53; port 81
+  gets no reply at all):
+
+      Attempting to connect to 1.1.1.1 on port 81...
+      The C++ program is now completely frozen...
+
+      OS finally gave up!
+      connect error: Connection timed out
+      Total time the program was frozen: 21.0243 seconds.
+
+  Where do 21 seconds come from? Not from Cloudflare -- their firewall discards
+  the packet in microseconds. From the local kernel refusing to give up:
+
+```
+  t=0s   Windows sends SYN        -> dropped silently
+  t=3s   no reply; resend SYN     -> dropped silently
+  t=9s   no reply; resend SYN     -> dropped silently
+  t=21s  final timer expires      -> connect() returns -1 ETIMEDOUT
+```
+
+  The retries are invisible to the program, but the kernel keeps a global
+  counter. netstat -s -p tcp, sampled before and after one frozen connect():
+
+      Segments Retransmitted  = 24100     (before)
+      Segments Retransmitted  = 24104     (after)
+
+  Exactly 4 extra transmissions during a call the program made once. On Linux
+  the default is 6 retries -- about 127 seconds frozen.
+
+  The contrast case: a port that cleanly REJECTS instead of dropping. Connecting
+  to a closed port on 127.0.0.1 came back in 2.05 seconds with Connection refused
+  -- an arriving RST means certainty, so the kernel does zero retries. (The two
+  seconds is a Windows loopback quirk; Linux returns in microseconds.) A test
+  sweep across gmail.com, mit.edu, caltech.edu on port 81 first looked like a
+  contradiction -- two of them "refused" in 2 seconds -- until the IPs gave it
+  away: the resolver had returned IPv6 addresses, inet_pton(AF_INET) failed to
+  parse them, the address fell back to 0.0.0.0, and those tests had been
+  connecting to localhost the whole time. The one real IPv4 target, caltech.edu,
+  froze for 21.04 seconds. Nearly the whole internet silently drops instead of
+  rejecting -- an instant RST would let a port scanner sweep 65,535 ports in
+  seconds, while a drop costs the scanner 21 seconds per port.
+
+  ==============================================================================================
+
+  V5 -- TAKING THE CLOCK BACK (O_NONBLOCK + BUSY-WAIT)
+
+  ==============================================================================================
+
+  The fix, still with no select and no poll: make the socket non-blocking before
+  connect(). The kernel starts the handshake and returns immediately with
+  EINPROGRESS. The program then owns the clock and polls in user space:
+
+```text
+  fcntl(client_fd, F_SETFL, O_NONBLOCK);
+  connect(client_fd, &address, sizeof(address));    // returns at once, EINPROGRESS
+
+  loop:  call connect() again
+         success or errno == EISCONN  -> connected, stop
+         2 seconds elapsed            -> give up, stop
+```
+
+  EISCONN is the errno for "already connected" -- calling connect() a second time
+  on a socket whose handshake finished returns it, which makes it the success
+  signal inside the loop. Against 1.1.1.1:81:
+
+      Attempting to connect to 1.1.1.1 on port 81 (NON-BLOCKING BUSY-WAIT)...
+      TIMEOUT! We waited exactly 2 seconds and took control back!
+
+  Two seconds, chosen by the program, not 21 chosen by the kernel. The price: the
+  loop spins millions of times per second and pins a CPU core at 100% for the
+  whole wait -- the same disease the file-polling consumer had in v3. Removing
+  that cost without threads is exactly what poll() exists for, and it stays
+  outside this post.
+
+  ==============================================================================================
+
+  WALL 8 -- THE LIE OF A SINGLE write() AND A SINGLE read()
+
+  ==============================================================================================
+
+  v6 and v7 stripped every loop and left the raw calls naked. Server: one
+  write() of 100 MB. Consumer: one read() asking for 3 MB. Terminal:
+
+      Consumer asking OS to read exactly 3,000,000 bytes...
+      Consumer actually received: 212992 bytes.
+      Server successfully pushed 638976 bytes into the network.
+
+  Three lies unpacked:
+
+  write() returning 638,976 does not mean the consumer got 638,976 bytes. It
+  means the local kernel copied that many bytes from the program's buffer into
+  its own send buffer before the connection died. The consumer read 212,992 of
+  them; the other 425,984 were in flight when the consumer's exit fired an RST,
+  and the kernel deleted them. A write() return value is a receipt from your own
+  kernel, never from the other machine.
+
+  read() returning 212,992 against a request of 3,000,000 is not an error. A
+  stream socket hands over whatever is in the receive buffer at that microsecond
+  -- here exactly one buffer unit of 212,992 bytes -- and returns. The remaining
+  megabytes were still on the sending side.
+
+  And the RST itself: the consumer exited with unread data still in its receive
+  buffer. Closing (or dying) with unread bytes makes the kernel send RST instead
+  of FIN, to warn the peer that data was destroyed. The distinction is visible
+  from the reader's side, and both cases were forced deliberately: after a
+  graceful server close (FIN), the consumer's read() returned 0; after a
+  SO_LINGER-zero server close (RST), read() returned -1.
+
+      [CONSUMER] read() returned 0! The Server gracefully hung up with a FIN!
+      [CONSUMER] read() returned -1! The Server crashed and fired an RST!
+
+  The repair is a loop with pointer arithmetic on both sides -- and the loop has
+  its own trap. The first attempt advanced the pointer by the return value
+  unconditionally; when write() returned -1, the pointer moved BACKWARDS one
+  byte and the loop ran forever. A return <= 0 must break out. With the read
+  loop fixed on the consumer only:
+
+      Consumer actually received: 3000000 bytes.
+      Server successfully pushed 3407872 bytes into the network.
+
+  The consumer assembled its full 3 MB by draining the 212,992-byte buffer over
+  and over. The server's total, 3,407,872, is exactly 16 x 212,992 -- whole
+  buffer units, nothing fractional.
+
+  ==============================================================================================
+
+  WALL 9 -- THE WINDOW FORENSICS (WHERE EVERY BYTE COUNT COMES FROM)
+
+  ==============================================================================================
+
+  The last stretch of the journey, v7 through v9, was pure interrogation: why
+  those exact numbers? Both sides got a sleep so the server would hit its true
+  ceiling before anything died:
+
+      Server successfully pushed 1064960 bytes into the network.    (run 1)
+      Server successfully pushed 2981888 bytes into the network.    (runs 2-5)
+
+  1,064,960 is 5 x 212,992. 2,981,888 is 14 x 212,992 -- and also exactly 728
+  pages of 4,096-byte RAM. The server's single write() filled the kernel's
+  allowance and was then suspended -- put to sleep inside the kernel -- until
+  the consumer freed space or died. cdb, attached to the MSVC-compiled version
+  mid-freeze, shows the suspension as a call stack:
+
+      ntdll!NtWaitForSingleObject          <-- thread parked by the kernel
+      mswsock!SockWaitForSingleObject      <-- waiting for buffer space
+      mswsock!WSPSend
+      WS2_32!send
+      main!support                         <-- the single write() in the C++ file
+      main!main
+
+  Every hypothesis for the run-1-versus-run-2 difference was killed with an
+  experiment. Random data instead of memset? Same numbers -- the kernel never
+  reads payload, only a pointer and a length. A freshly recompiled exe for every
+  run, so nothing is cached from the binary? Same numbers. The experiment that
+  finally discriminated: give every run a DIFFERENT loopback IP. Fresh IPs never
+  reached 2,981,888:
+
+      RUN 1 (127.0.0.1):  1064960
+      RUN 2 (127.0.0.2):  1490944
+      RUN 3 (127.0.0.3):  1490944
+      RUN 4 (127.0.0.4):  1277952
+
+  The kernel caches per-destination route metrics: after one connection to an IP
+  proves the path, the NEXT connection to that same IP -- from an unrelated
+  process -- inherits the grown window. New IP, cold clamp. Same IP, warm 14x.
+  The processes were always independent; the kernel's route cache was the shared
+  memory between them.
+
+  And the jitter on the fresh IPs is arithmetic, not noise. When the consumer
+  exits, two packets race across loopback: the ACK announcing "I read 212,992
+  bytes, window open" and the RST announcing "I am dead." Whichever the server's
+  kernel processes first decides the final count:
+
+```
+  RST first:            1,064,960                      (cold clamp, nothing more)
+  one ACK first:        1,064,960 + 212,992 = 1,277,952
+  two ACKs first:       1,064,960 + 425,984 = 1,490,944
+```
+
+  Every observed value fits. The raw packets agree too -- pktmon, Windows'
+  built-in kernel packet monitor, captured the SYN options and the RSTs on the
+  wire:
+
+      options [mss 65495,nop,wscale 8,nop,nop,sackOK]
+      Flags [R.], win 0    DropReason INET: received RST
+
+  mss 65495 is the kernel declaring its slice size -- one write() becomes
+  thousands of segments no bigger than that, chopped inside the kernel's own
+  loop. wscale 8 is the window multiplier (2 to the 8th) negotiated in the
+  handshake, which is why every measured ceiling is a clean multiple of the
+  buffer unit.
+
+  One honest debt from the journey: TCP_NODELAY landed in the code before its
+  bug (the Nagle small-packet hold-back timer) was ever demonstrated -- the one
+  fix accepted on faith. Its demo lives in a later post.
+
+  ==============================================================================================
+
+  WHAT THE ONE FILE BOUGHT
+
+  ==============================================================================================
+
+```
+  v1     strcmp == 0                        two processes, zero bytes
+  v2-v3  open flags, O_TRUNC, ENOENT,       a file is not a phone line:
+         partial write, 255-byte read       polling burns a core
+  v4     EADDRINUSE / SO_REUSEADDR          the port morgue
+         ghost accept / ECONNABORTED        the kernel shakes hands without you
+         backlog is a hint / ECONNREFUSED   the kernel refuses without telling you
+         TIME_WAIT 1159 -> 0 at 240s        2 x MSL, measured
+         CLOSE_WAIT zombies, fd 2050        one missing close() = dead server
+         setrlimit ignored (cdb proof)      POSIX is a costume on Windows
+         21s connect freeze, 4 SYNs         the kernel owns the clock
+  v5     O_NONBLOCK + EINPROGRESS/EISCONN   take the clock back, pay in CPU
+  v6-v7  write/read return values           receipts from your kernel, not the peer
+         FIN -> read 0, RST -> read -1      how death looks from the other side
+  v8-v9  212,992-byte units, route cache,   the window is kernel law,
+         ACK-vs-RST race, cdb suspension    and it is all arithmetic
+```
+
+  ==============================================================================================
+
+  PROOF -- THE JOURNEY'S ARITHMETIC, CHECKED
+
+  ==============================================================================================
+
+  The byte counts above make exact claims: every ceiling is a whole multiple of
+  the 212,992-byte buffer unit, the hot ceiling is a whole number of 4,096-byte
+  RAM pages, the fresh-IP jitter values are the cold clamp plus whole ACK units,
+  the kernel sent exactly 4 extra SYNs during the 21-second freeze, and
+  TIME_WAIT drained at exactly 2 x MSL. One bad remainder anywhere would break
+  the story. This program checks all of it with no sockets and no OS calls.
+
+```cpp
+#include <cstdio>
+
+int main() {
+    long unit = 212992;
+
+    long cold = 1064960;
+    long hot  = 2981888;
+    long rstw = 3407872;
+    printf("cold_units: %ld rem %ld\n", cold / unit, cold % unit);
+    printf("hot_units: %ld rem %ld\n",  hot / unit,  hot % unit);
+    printf("rst_units: %ld rem %ld\n",  rstw / unit, rstw % unit);
+
+    long page = 4096;
+    printf("hot_pages: %ld rem %ld\n", hot / page, hot % page);
+
+    long race_one_ack  = cold + unit;
+    long race_two_acks = cold + 2 * unit;
+    printf("race_one_ack: %ld\n",  race_one_ack);
+    printf("race_two_acks: %ld\n", race_two_acks);
+
+    long retrans_before = 24100;
+    long retrans_after  = 24104;
+    printf("syn_retries: %ld\n", retrans_after - retrans_before);
+
+    long msl = 120;
+    printf("time_wait_secs: %ld\n", 2 * msl);
+
+    return 0;
+}
+```
+
+  Running this prints:
+
+      cold_units: 5 rem 0
+      hot_units: 14 rem 0
+      rst_units: 16 rem 0
+      hot_pages: 728 rem 0
+      race_one_ack: 1277952
+      race_two_acks: 1490944
+      syn_retries: 4
+      time_wait_secs: 240
+
+  Five, fourteen, and sixteen whole units, zero remainder each. 728 whole RAM
+  pages. Both jitter values reproduced by adding whole units to the cold clamp.
+  Four retransmissions. Two hundred forty seconds. The kernel never improvises;
+  it counts.
+
+  >> STANDARD NAMES
+     TIME_WAIT        -> state a closed socket holds for 2 x MSL to catch
+                        delayed packets; blocks bind() on Linux without
+                        SO_REUSEADDR
+     MSL              -> Maximum Segment Lifetime, the longest a packet may
+                        live in the network; 120s on this Windows machine
+     SO_REUSEADDR     -> socket option letting bind() take a port whose old
+                        sockets are in TIME_WAIT
+     SO_LINGER (0)    -> close() sends RST instead of FIN; skips TIME_WAIT,
+                        destroys unsent data
+     FIN / RST        -> polite close versus violent abort; reader sees
+                        read() == 0 for FIN, read() == -1 for RST
+     EADDRINUSE       -> bind() failure when the port is taken
+     ECONNABORTED     -> accept() failure when a queued connection died first
+     ECONNREFUSED     -> connect() failure when the kernel's backlog queue is
+                        full or nothing listens on the port
+     backlog          -> listen()'s queue-size hint; the kernel may adjust it
+     CLOSE_WAIT       -> state of a socket whose peer sent FIN but whose owner
+                        never called close(); leaks one file descriptor
+     EMFILE           -> accept()/socket() failure when the file descriptor
+                        table is full (2048 under the Microsoft C runtime)
+     file descriptor  -> integer handle to a kernel object; sockets on Windows
+                        live in kernel memory (the non-paged pool) outside
+                        POSIX limits
+     non-paged pool   -> kernel RAM that is never swapped to disk; where
+                        Windows keeps socket buffers
+     EINPROGRESS      -> non-blocking connect() started; handshake still
+                        running in the kernel
+     EISCONN          -> connect() called on an already-connected socket;
+                        the success signal in a connect-polling loop
+     ETIMEDOUT        -> connect() gave up after the kernel's own SYN retries
+     MSS              -> Maximum Segment Size; largest TCP payload per
+                        segment (65,495 on this loopback)
+     wscale           -> TCP window scale option; multiplier of 2^n negotiated
+                        in the handshake (n = 8 here)
+     Nagle / TCP_NODELAY -> kernel timer batching small writes; the option
+                        that turns it off
+     polling          -> asking again in a loop instead of being woken;
+                        burns a CPU core at 100%
+     pktmon           -> Windows built-in kernel packet monitor
+     cdb              -> Windows command-line debugger; dumped the frozen
+                        thread's call stack and the setrlimit struct bytes
+     syscall          -> a request from the program into the kernel; write(),
+                        read(), connect(), accept() are all syscalls
+
+  =========================================================================
+

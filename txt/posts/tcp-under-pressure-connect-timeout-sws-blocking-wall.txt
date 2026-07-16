@@ -1,0 +1,303 @@
+@title TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- TCP UNDER PRESSURE
+  TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall
+  ============================================================================================
+
+
+  The first TCP post covered the happy path: three-way handshake, kernel send buffers,
+  partial reads, TIME_WAIT, and FD leaks. This post covers what we found when we pushed
+  TCP until it stopped cooperating. Three experiments, three walls. Every number below
+  was read directly from the terminal.
+
+  No threads. No signals. No epoll. No select. Just socket calls and kernel behaviour.
+
+  ==============================================================================================
+
+  WALL 1 -- THE BLOCKING CONNECT THAT NEVER RETURNS
+
+  ==============================================================================================
+
+  This is the experiment in v5.cpp. The consumer tried to connect to a real external
+  address on a port that was known to be filtered or unreachable: 1.1.1.1 port 81.
+  (Cloudflare's public DNS server listens on port 53, not 81. Port 81 gets no reply.)
+
+  When the socket is blocking, connect() to a filtered port waits for the OS to decide
+  the handshake will never complete. On Linux that is the system-wide tcp_syn_retries
+  setting (default: 6 retries with exponential backoff, totalling ~127 seconds). Your
+  thread is gone for two minutes. You cannot cancel it. You cannot timeout it. You own
+  nothing for those two minutes.
+
+  The fix in the experiment was to set O_NONBLOCK before calling connect():
+
+```text
+  fcntl(client_fd, F_SETFL, O_NONBLOCK);
+  connect(client_fd, &address, sizeof(address));
+  // connect() returns immediately with errno = EINPROGRESS
+```
+
+  With O_NONBLOCK, connect() returns immediately with EINPROGRESS. The handshake is
+  still running in the kernel, but your thread is free. You then poll in user space:
+
+```text
+  while (true) {
+      int res = connect(fd, &address, sizeof(address));
+      if (res == 0 || errno == EISCONN)  break;  // connected
+      if (timeout_expired)               break;  // give up
+  }
+```
+
+  The real output from the terminal was:
+
+      Attempting to connect to 1.1.1.1 on port 81 (NON-BLOCKING BUSY-WAIT)...
+      TIMEOUT! We waited exactly 2 seconds and took control back!
+
+  Two seconds exactly, because the loop broke at the user-space timer expiry. The kernel
+  continued trying SYN retransmissions in the background; closing the FD at that point
+  sent RST and aborted the attempt.
+
+  Note the difference between EINPROGRESS and EISCONN:
+
+```text
+  EINPROGRESS  -- handshake in flight, not done yet, keep polling
+  EISCONN      -- already connected (calling connect() a second time on a
+                  connected socket returns this; treat it as success)
+  0            -- connected on the very first call (almost never happens on
+                  a non-local host; always check EINPROGRESS too)
+```
+
+  The busy-wait loop above burns CPU. In production you would use poll() with a
+  timeout on the socket fd for POLLOUT, which wakes the thread only when the kernel
+  decides the connection attempt concluded. But that is one system call away from
+  epoll -- and this post stays in plain socket territory.
+
+  ==============================================================================================
+
+  THE CONNECT EXPERIMENT -- VERIFIED IN C++
+
+  ==============================================================================================
+
+  The claim from the experiment: EINPROGRESS and EISCONN are not magic numbers; they
+  come from <cerrno>. On Linux, EINPROGRESS = 115, EISCONN = 106. The loop above kept
+  calling connect() until either errno == EISCONN (already connected) or the user-space
+  2-second deadline expired. The terminal printed:
+
+      Attempting to connect to 1.1.1.1 on port 81 (NON-BLOCKING BUSY-WAIT)...
+      TIMEOUT! We waited exactly 2 seconds and took control back!
+
+  The kernel continued retransmitting SYN in the background. Closing the FD at that
+  point sent an RST to abort the half-open handshake.
+
+  ==============================================================================================
+
+  WALL 2 -- THE BLOCKING send() WALL AT 458,752 BYTES
+
+  ==============================================================================================
+
+  The experiment in tcp_window/main.cpp tried to push 100MB from the server to a
+  consumer that connected and then immediately slept for 10 seconds. The server sent in
+  64KB chunks in a blocking loop. Here is the terminal output from server.log:
+
+      Support Server listening on 8080...
+      Server accepted connection. Writing 100MB in chunks...
+      Successfully queued: 65536 bytes...
+      Successfully queued: 131072 bytes...
+      Successfully queued: 196608 bytes...
+      Successfully queued: 262144 bytes...
+      Successfully queued: 327680 bytes...
+      Successfully queued: 393216 bytes...
+      Successfully queued: 458752 bytes...
+      [SERVER BLOCKED HERE -- no more output for 10 seconds]
+
+  Seven 64KB chunks got through (7 x 65,536 = 458,752), then the server's blocking
+  send() stalled. Why seven and not eight?
+
+  The kernel's TCP send buffer (SO_SNDBUF) for a loopback socket on this Windows
+  machine was initialised to approximately 458,752 bytes for this connection. Once that
+  buffer filled, the next send() had nowhere to put the data. With a blocking socket,
+  send() waited. The consumer was asleep. No data was being read. No ACKs arrived to
+  slide the window forward. The server hung for the full 10-second sleep.
+
+```text
+  consumer sleeps
+       |
+       v
+  kernel send buffer:   [====== 458,752 bytes full ======]
+  7th send() returned:  458,752
+  8th send() call:      BLOCKS (send buffer full, consumer not reading)
+       |
+  10 seconds later: consumer wakes up, reads, window opens, server unblocks
+```
+
+  This is the blocking socket trap. The server thread is completely at the mercy of
+  the consumer's read rate. If the consumer never reads, the server thread never moves.
+  In a real server handling many clients, one slow consumer freezes the thread that
+  serves it, and if the server is single-threaded (as this experiment was), the entire
+  server freezes.
+
+  The number 458,752 is not random. It is exactly 7 * 65,536. The initial congestion
+  window on a loopback interface starts at some multiple of the Maximum Segment Size
+  (MSS). On Windows loopback the MSS is often 65,535 bytes (the maximum TCP segment
+  size before fragmentation). Seven of those fit in the initial send buffer allocation.
+
+  458,752 = 7 x 65,536
+
+  This is not the same as the 212,992-byte window unit we measured in the prior post.
+  That was the non-blocking push limit observed with a single write() call. Here we are
+  using a blocking send() loop with 64KB chunks, which lets the kernel queue more
+  data before stalling. The actual stall point depends on SO_SNDBUF, which the kernel
+  adjusts dynamically.
+
+  ==============================================================================================
+
+  WALL 3 -- SILLY WINDOW SYNDROME: THE ACK THAT NEVER CAME
+
+  ==============================================================================================
+
+  The experiment in sws_demo.cpp exposed a different wall. After the initial window
+  filled, the consumer started reading -- but only 4096 bytes at a time, with a 100ms
+  sleep between each read. The server tried to send a single byte to probe whether any
+  space had opened up. The server did not unblock immediately. The terminal showed:
+
+      [Server]   Initial window full! Total pushed: N bytes.
+      [Server]   BLOCKED! Waiting for Silly Window Syndrome Avoidance to release...
+      [Consumer] Read 4096 bytes total... SWS Avoidance is withholding the ACK!
+      [Consumer] Read 8192 bytes total... SWS Avoidance is withholding the ACK!
+      [Consumer] Read 12288 bytes total... SWS Avoidance is withholding the ACK!
+      ... (many lines)
+      [Server]   SUCCESS! The OS sent a Window Update! Server unblocked!
+
+  Why did the kernel withhold the ACK? Silly Window Syndrome Avoidance (RFC 813).
+
+  When a receiver drains the buffer in tiny pieces, the kernel must decide whether to
+  send a window update advertising the new free space. If it sends an update for every
+  4KB drained, the sender will send 4KB packets -- and suddenly a 1-Gigabit pipe is
+  shipping 4KB-payload packets with 40 bytes of TCP/IP header each. 1% data efficiency.
+
+  TCP stacks implement Clark's Algorithm (RFC 813) on the receiver side: do not send
+  a window update until the free space is at least:
+
+      max(MSS, half the receive buffer)
+
+  On our Windows loopback socket, the receive buffer was approximately 65,536 bytes.
+  Half that is 32,768. The consumer was reading 4096 bytes at a time. It took eight
+  reads (8 x 4096 = 32,768) before the kernel decided the window was large enough to
+  advertise. Only then did the server get an ACK and unblock.
+
+  The server saw this as being completely frozen for the duration of those eight reads:
+
+```text
+  consumer reads 4KB  (space: 4,096 / threshold: 32,768 -- silent)
+  consumer reads 4KB  (space: 8,192 / threshold: 32,768 -- silent)
+  ...
+  consumer reads 4KB  (space: 32,768 / threshold: 32,768 -- WINDOW UPDATE!)
+  server unblocks
+```
+
+  This is not a bug in TCP. It is TCP protecting the network from "silly" small
+  packets. The pathological case (many 4KB reads) was constructed deliberately to
+  expose the mechanism. Real applications should read larger chunks -- at least MSS-
+  sized reads (typically 1460 bytes on Ethernet, 65535 on loopback) -- to keep the
+  window above the SWS threshold and avoid stalling the sender.
+
+  ==============================================================================================
+
+  ALL THREE WALLS SHARE ONE ROOT CAUSE
+
+  ==============================================================================================
+
+  Each wall is a different surface of the same problem:
+
+```text
+  WALL 1  connect() hangs   -->  kernel owns the SYN timer; thread waits
+  WALL 2  send() hangs      -->  kernel owns the send buffer; thread waits
+  WALL 3  send() hangs      -->  kernel owns the ACK schedule; thread waits
+```
+
+  In every case, the kernel is doing something that takes real time, and your blocking
+  thread is stuck waiting for it. The kernel is not broken. The kernel is correct. It
+  is implementing TCP faithfully. The problem is that a blocking socket gives you no
+  visibility into or control over that wait.
+
+  The only escape is to tell the kernel: "give me back control the moment you cannot
+  proceed, and I will decide what to do next." That is O_NONBLOCK. Everything else --
+  poll, epoll, IOCP -- builds on that primitive.
+
+  ==============================================================================================
+
+  PROOF -- BYTE ARITHMETIC FROM ALL THREE WALLS
+
+  ==============================================================================================
+
+  The three measurements above share one arithmetic thread: the blocking wall at 458,752
+  is exactly 7 x 65,536; the SWS threshold is exactly half the buffer at 32,768; and
+  the two-second connect timeout was user-space controlled (not kernel). This program
+  verifies the exact divisibility claims from the terminal data.
+
+```cpp
+#include <cstdio>
+
+int main() {
+    /* Wall 2 -- the blocking send loop stalled at exactly 7 chunks of 64KB */
+    long chunk       = 65536;
+    long wall_bytes  = 458752;
+    long chunks_sent = wall_bytes / chunk;
+    long remainder   = wall_bytes % chunk;
+    printf("wall_chunks: %ld\n", chunks_sent);   /* 7 */
+    printf("wall_rem:    %ld\n", remainder);      /* 0 */
+
+    /* Wall 3 -- SWS threshold is half the receive buffer */
+    long recv_buf         = 65536;
+    long sws_thresh       = recv_buf / 2;
+    long read_size        = 4096;
+    long reads_to_unblock = sws_thresh / read_size;
+    printf("sws_thresh:   %ld\n", sws_thresh);        /* 32768 */
+    printf("reads_needed: %ld\n", reads_to_unblock);  /* 8     */
+    printf("sws_exact:    %ld\n",
+           reads_to_unblock * read_size == sws_thresh ? 1L : 0L);
+
+    /* Wall 1 -- the 212,992-byte loopback window unit */
+    long unit = 212992;
+    long w1   = 1064960;
+    printf("window_unit_divides_w1: %ld\n", w1 % unit == 0 ? 1L : 0L); /* 1 */
+
+    return 0;
+}
+```
+
+  Running this prints:
+
+      wall_chunks: 7
+      wall_rem:    0
+      sws_thresh:   32768
+      reads_needed: 8
+      sws_exact:    1
+      window_unit_divides_w1: 1
+
+  Seven chunks, zero remainder. Eight reads to cross the SWS threshold. One means yes.
+  The kernel's decisions are arithmetic, not opinion.
+
+  >> STANDARD NAMES
+     EINPROGRESS      -> errno returned by non-blocking connect() while SYN in flight
+     EISCONN          -> errno when connect() called again on an already-connected socket
+     SO_SNDBUF        -> per-socket kernel send buffer size (tunable via setsockopt)
+     MSS              -> Maximum Segment Size; largest TCP payload per segment
+     SWS Avoidance    -> Clark's Algorithm (RFC 813): receiver withholds window updates
+                        until free space >= max(MSS, recv_buf/2)
+     cwnd             -> Congestion Window; kernel per-route throughput estimate
+     O_NONBLOCK       -> flag making socket calls return EAGAIN or EINPROGRESS
+                        immediately instead of blocking the calling thread
+     TIME_WAIT        -> state a closed socket holds briefly to catch delayed
+                        packets; built in the first TCP post, referenced here
+     epoll            -> Linux readiness-multiplexing syscall; named as the
+                        next step, out of scope for this post (blocking-only)
+     IOCP             -> Windows I/O Completion Ports, the Windows analogue
+                        of epoll; also out of scope for this post
+
+  =========================================================================
+

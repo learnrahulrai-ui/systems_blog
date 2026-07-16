@@ -61,7 +61,7 @@
   3. `class main::__l2::<lambda_a8ad...>` (The Server Lambda)
   4. `class Server` (The Server)
 
-  Even when the raw numeric memory addresses look similar due to heavily optimized heap allocations and local stack scopes, the C++ type system strictly separates them.
+  Even when the raw numeric memory addresses look similar due to heavily optimized heap allocations and local stack scopes, the C++ type system keeps them separate.
 
   The Worker Lambda never magically transforms into the Server. It is just an object, calling a wrapper object, calling another object, which finally triggers the server object. This is the mechanical reality of asynchronous C++.
 

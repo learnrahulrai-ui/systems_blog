@@ -71,7 +71,7 @@ int main() {
 
   1. **Signal**: You must set a flag (like `stop_ = true`) so the loop knows it's time to quit.
   2. **Wake up**: If the thread is sleeping on a condition variable, you must call `cv.notify_one()` so it wakes up, checks the flag, and breaks out of the loop.
-  3. **Join**: You must call `background_writer_.join()`. This physically pauses the destructor until the background thread completely finishes its execution and gracefully returns from `processQueue()`.
+  3. **Join**: You must call `background_writer_.join()`. This pauses the destructor until the background thread completely finishes its execution and gracefully returns from `processQueue()`.
 
   By doing these three things, the `std::thread` object is no longer "running" when it gets destroyed, and the C++ runtime allows your program to exit safely.
 

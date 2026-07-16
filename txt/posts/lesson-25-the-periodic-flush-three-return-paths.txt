@@ -62,11 +62,11 @@ std::string msg = std::move(log_queue_.front());  // CRASH!
 
   | Case | What happens | Result |
   |------|-------------|--------|
-  | 1 req + stop (fast) | notify wakes, stop_+empty detected | ✓ Works |
+  | 1 req + stop (within 5s) | notify wakes, stop_+empty detected | ✓ Works |
   | 0 req + stop | stop_ true immediately | ✓ Works |
-  | 3 req + stop (fast) | drain all, then stop_+empty | ✓ Works |
+  | 3 req + stop (within 5s) | drain all, then stop_+empty | ✓ Works |
   | **4 req, NO stop** | **drain all, enter wait_for, 5s → timeout → front() on EMPTY** | **✗ CRASH** |
-  | 4 req + stop (fast) | drain all, then stop_+empty | ✓ Works |
+  | 4 req + stop (within 5s) | drain all, then stop_+empty | ✓ Works |
 
   --------
   WE CORRECT THE SEAM BY LEAVING THE QUEUE DRAINED

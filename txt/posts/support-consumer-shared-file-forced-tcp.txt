@@ -1,0 +1,313 @@
+@title Support and Consumer: How a Shared File Forced Us Into TCP :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- SUPPORT AND CONSUMER
+  Support and Consumer: How a Shared File Forced Us Into TCP
+  ============================================================================================
+
+
+  This whole project is one file, rewritten from a blank screen nine times: v1.cpp
+  through v9.cpp. No file gets split into headers. No thread. No signal. No select,
+  no poll, no epoll. Every version compiles as a single .cpp with two roles picked
+  by argv[1]: support, like the agent who answers the call, and consumer, like the
+  customer on the other end. The first version of that file could not get one word
+  from support to consumer. This is the story of what a shared file could and could
+  not do for them, and how its limits built the case for TCP before either process
+  had ever called socket().
+
+  ==============================================================================================
+
+  V1 -- TWO PROCESSES, ZERO COMMUNICATION
+
+  ==============================================================================================
+
+  v1.cpp does one thing: read argv[1], and call support() or consumer(). Nothing
+  is shared between the two. Running the binary twice starts two processes that
+  have never heard of each other.
+
+```
+  ./v1 support                        ./v1 consumer
+  +-------------------+               +-------------------+
+  | argv[1]="support"  |               | argv[1]="consumer" |
+  | prints to its own  |               | prints to its own  |
+  | stdout, exits      |               | stdout, exits      |
+  +-------------------+               +-------------------+
+       no shared memory, no file, no socket -- nothing to break yet
+```
+
+  The dispatch logic looks trivial and was not:
+
+```text
+  if ( strcmp(argv[1], "support") {
+      support();
+  }
+```
+
+  That line does not compile. The real compiler output:
+
+      v1.cpp:25:36: error: expected ')' before '{' token
+         25 |     if ( strcmp(argv[1], "support") {
+
+  Fixing the missing parenthesis is not the real trap. strcmp() returns the
+  numeric difference between two strings -- 0 when they match, nonzero when they
+  do not:
+
+```text
+  strcmp("support", "support")  ->  0   (match)
+  strcmp("support", "other")    ->  nonzero (different)
+```
+
+  Written as a bare condition, if (strcmp(argv[1], "support")), C++ treats 0 as
+  false. That means the branch runs only when the strings do NOT match -- the
+  exact opposite of what the code appears to say. The fix is spelling out the
+  comparison: if (strcmp(argv[1], "support") == 0). Once both branches used
+  == 0, the real output was:
+
+      ./v1.exe support   -> hello; this is support
+      ./v1.exe consumer  -> hello; this is consumer
+
+  Two processes now print two different sentences. They still have not exchanged
+  a single byte.
+
+  ==============================================================================================
+
+  V2 -- A FILE AS THE FIRST MESSAGE PIPE
+
+  ==============================================================================================
+
+  v2.cpp gives support something to write into and consumer something to read
+  from: a plain file, chat.txt.
+
+```
+  support                                        consumer
+  +-----------+     write()      +----------+     read()      +-----------+
+  | buffer    | ---------------> | chat.txt | <--------------- | buffer    |
+  +-----------+  open(O_WRONLY)  +----------+  open(O_RDONLY)  +-----------+
+```
+
+  The first attempt at open() took only a filename:
+
+      v2.cpp:11:18: error: too few arguments to function 'int open(const char*, int, ...)'
+         11 |     int fd = open("chat.txt");
+
+  open() with no flags defaults to a mode that cannot create or write a file.
+  Writing requires the mode spelled out: O_WRONLY | O_CREAT, plus a permission
+  number (0644) because O_CREAT needs one. The second attempt over-specified the
+  other call in the same function:
+
+      v2.cpp:19:11: error: too many arguments to function 'char* strcpy(char*, const char*)'
+         19 |     strcpy(buffer, "hello consumer", len);
+
+  strcpy() takes exactly two arguments; the three-argument form belongs to
+  strncpy(). Fixed, compiled, and run, chat.txt held exactly what support wrote:
+
+      Output of `cat chat.txt`:
+      hello consumer
+
+  Three more questions turned up real bugs before v2 was done:
+
+  What happens if support runs a second time with a shorter message, say "bye",
+  using the same O_WRONLY | O_CREAT flags? open() without O_TRUNC does not erase
+  the old content -- it starts overwriting bytes at offset 0 and stops the moment
+  the new string ends. The old bytes past that point are untouched:
+
+```text
+  old file:  h e l l o  ' '  c o n s u m e r
+  write "bye" at offset 0, no O_TRUNC:
+  new file:  b y e l o  ' '  c o n s u m e r
+```
+
+  chat.txt now reads "byelo consumer" -- three fresh bytes glued to eleven bytes
+  of garbage nobody asked for. O_TRUNC in the open() flags erases the file to
+  length zero before the write, so a shorter message leaves nothing behind.
+
+  Second: does write(fd, buffer, len) guarantee it wrote all len bytes in one
+  call? No. write() returns the number of bytes it actually accepted, which can
+  be less than len. A caller that ignores the return value can silently drop the
+  tail of a message; the fix is a loop that keeps calling write() with the
+  remaining bytes until the total written equals len.
+
+  Third: what happens if consumer runs before support has ever run, and calls
+  open("chat.txt", O_RDONLY)? The file does not exist yet. open() returns -1
+  and errno is set to ENOENT -- no such file or directory. There is no ordering
+  guarantee between two independent processes; the file only works if support
+  wins the race.
+
+  ==============================================================================================
+
+  V3 -- READING IT BACK, AND THE WALL THAT KILLS FILES AS IPC
+
+  ==============================================================================================
+
+  v3.cpp fills in consumer(): open chat.txt read-only, read into a 256-byte
+  buffer, print it.
+
+```text
+  char buffer[256];
+  int bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+  buffer[bytes_read] = '\0';
+```
+
+  Why sizeof(buffer) - 1 and not 256? If read() is asked for the full 256 and
+  the file actually has 256 bytes waiting, bytes_read comes back 256, and
+  buffer[256] = '\0' writes one byte past the end of a 256-byte array. Valid
+  indices for a 256-byte buffer run 0 through 255; asking for 255 bytes at most
+  leaves index 255 free for the terminator. Running it confirmed the file wrote
+  exactly what support had put there:
+
+      Output of ./v3.exe consumer:
+      hello consumer
+
+  A second question exposed the same read() call does not scale: if chat.txt
+  held a 10 megabyte file, would read(fd, buffer, 255) return the whole thing in
+  one call? No -- it returns at most 255 bytes and stops. Printing a large file
+  correctly needs a loop: read again and again, printing each chunk, until
+  read() returns 0 (end of file).
+
+  The third question is the one that ends the file-as-chat design entirely: if
+  support and consumer are both running at the same time and need a real
+  back-and-forth conversation, why is a plain file a bad way to do it?
+
+  A file has exactly one way to check for new bytes: open it, or read it, again.
+  There is no notification. consumer has no way to be told "new data has
+  arrived" -- it can only ask, over and over:
+
+```
+  consumer, waiting for new bytes:
+
+  while (true) {
+      read(fd, buffer, size);   <- returns instantly, changed or not
+  }                                 spins millions of times a second
+                                     one CPU core pinned doing nothing useful
+```
+
+  That loop is polling: burning a full CPU core to ask a question that is
+  usually answered "nothing changed." And if support and consumer ever try to
+  write to the same file at the same moment, there is nothing stopping their
+  writes from interleaving into a corrupted mess -- a plain file gives you no
+  locking, no ordering, no signal.
+
+  ==============================================================================================
+
+  WHY A FILE CANNOT DO WHAT A SOCKET DOES
+
+  ==============================================================================================
+
+  The gap is not about speed. It is about what the calling thread is allowed to
+  do while waiting.
+
+```
+  FILE     read() returns immediately, every single call, changed or not.
+           The only way to "wait" for new data is to call it again and again.
+
+  SOCKET   read() can PARK the calling thread inside the kernel. The kernel
+           itself wakes the thread up only once new bytes have actually
+           arrived. The CPU core is free the entire time in between.
+```
+
+  v4.cpp keeps the exact same shape -- support() and consumer(), picked by
+  argv[1], one file, no threads -- and replaces the file descriptor for
+  chat.txt with a file descriptor for a TCP socket:
+
+```
+  v3 (file)                              v4 (socket)
+  fd = open("chat.txt", ...)             fd = socket(AF_INET, SOCK_STREAM, 0)
+  write(fd, buffer, len)                 write(fd, buffer, len)
+  read(fd, buffer, size)                 read(fd, buffer, size)
+```
+
+  The function calls barely change. What changes is what the kernel is willing
+  to do with that integer on the other end: bind a port, queue incoming
+  connections, and put a waiting reader to sleep until a remote process
+  actually sends something.
+
+  ==============================================================================================
+
+  WHAT CAME NEXT
+
+  ==============================================================================================
+
+  Two posts trace what support and consumer ran into once fd meant a socket
+  instead of a file: the three-way handshake, kernel send and receive buffers,
+  partial reads, port reuse, and abortive closes are in "TCP: The Whole
+  Contract." A blocking connect() to a filtered address, a blocking send() that
+  stalls at an exact byte count, and Silly Window Syndrome withholding an ACK
+  are in "TCP Under Pressure." Both start from the same two roles built here.
+
+  ==============================================================================================
+
+  PROOF -- THE THREE CLAIMS, CHECKED WITHOUT A FILE OR A SOCKET
+
+  ==============================================================================================
+
+  Three claims carried this post: strcmp() returns 0 on a match, an open()
+  without O_TRUNC leaves old bytes glued past a shorter write, and a 256-byte
+  buffer has only 255 safe indices before the terminator byte overflows it.
+  None of the three needs a real file or a real network call to check.
+
+```cpp
+#include <cstdio>
+#include <cstring>
+
+int main() {
+    /* Claim 1 -- strcmp returns 0 on match, nonzero on difference */
+    int same = strcmp("support", "support");
+    int diff = strcmp("support", "consumer");
+    printf("strcmp_match: %d\n", same);              /* 0 */
+    printf("strcmp_diff:  %d\n", diff != 0 ? 1 : 0);  /* 1 */
+
+    /* Claim 2 -- O_TRUNC missing: a 3-byte write over a 14-byte file
+       leaves the file's old tail bytes untouched past the new content */
+    char file_buf[16] = "hello consumer";
+    file_buf[0] = 'b';
+    file_buf[1] = 'y';
+    file_buf[2] = 'e';
+    printf("after_short_overwrite: %s\n", file_buf);  /* byelo consumer */
+
+    /* Claim 3 -- a 256-byte buffer has valid indices 0..255; writing the
+       terminator at index 256 (a full 256-byte read) is out of bounds */
+    int buffer_size = 256;
+    int last_valid   = buffer_size - 1;
+    int safe_read     = 255;
+    int unsafe_read    = 256;
+    printf("last_valid_index: %d\n", last_valid);                           /* 255 */
+    printf("safe_terminator:  %d\n", safe_read   <= last_valid ? 1 : 0);    /* 1 */
+    printf("unsafe_terminator_oob: %d\n", unsafe_read > last_valid ? 1 : 0);/* 1 */
+
+    return 0;
+}
+```
+
+  Running this prints:
+
+      strcmp_match: 0
+      strcmp_diff:  1
+      after_short_overwrite: byelo consumer
+      last_valid_index: 255
+      safe_terminator:  1
+      unsafe_terminator_oob: 1
+
+  Zero on match. A garbage tail that spells "byelo consumer," exactly as chat.txt
+  did. And index 256 confirmed out of bounds for a 256-byte array. Three separate
+  bugs from three separate sessions, each one a fact about C and POSIX, not an
+  opinion.
+
+  >> STANDARD NAMES
+     file descriptor  -> integer handle the kernel returns for an open file or
+                        socket; the real object lives in kernel memory
+     O_TRUNC          -> open() flag that erases existing file content to
+                        length zero before the first write
+     O_CREAT          -> open() flag that creates the file if it does not
+                        already exist; requires a permission argument (0644)
+     ENOENT           -> errno set by open() when the target path does not
+                        exist
+     EOF              -> end of file; read() returns 0 (not -1) to signal it
+     polling          -> repeatedly checking for a change with no way to be
+                        notified when it happens; burns CPU with no work done
+
+  =========================================================================
+

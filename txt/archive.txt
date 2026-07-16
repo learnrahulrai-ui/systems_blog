@@ -11,12 +11,34 @@
   SPECIALS
   --------
 
+  [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
+    2026-07-16 . special . tcp, kernel, sockets, journey, minicom
+    The whole support/consumer story reconstructed from the git log: v1's strcmp
+    trap, the chat.txt file era, then nine TCP walls -- EADDRINUSE, the ghost in
+    the accept queue, backlog refusals, the TIME_WAIT morgue drained at exactly
+    240s, CLOSE_WAIT zombies at fd 2050, setrlimit ignored under cdb, the 21s
+    connect freeze with 4 counted SYNs, the 212,992-byte window units, the route
+    cache, and the ACK-vs-RST race -- with the arithmetic checked in C++.
+
+  [Support and Consumer: How a Shared File Forced Us Into TCP](posts/support-consumer-shared-file-forced-tcp.txt)
+    2026-07-15 . special . tcp, posix, file-io, sockets, strcmp
+    The origin story before any socket call: a shared file between two processes,
+    the strcmp trap, O_TRUNC leaving old bytes behind, the off-by-one terminator,
+    and the busy-wait polling loop that made the case for a real network protocol.
+
   [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
     2026-07-15 . special . tcp, kernel, sockets, timewait, rfc-2140
     The three-way handshake, kernel send/receive buffers, partial reads, TIME_WAIT,
     SO_LINGER abortive close, ECONNABORTED, FD leaks, and the RFC 2140 loopback cache
     effect -- every step traced from the real experiments, no hand-waving, with a
     runnable C++ proof at the end.
+
+  [TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall](posts/tcp-under-pressure-connect-timeout-sws-blocking-wall.txt)
+    2026-07-15 . special . tcp, kernel, sockets, non-blocking, silly-window-syndrome
+    Three walls where TCP stops cooperating: a blocking connect() to a filtered port
+    that never returns, a blocking send() that stalls at exactly 458,752 bytes (7 x
+    64KB), and Silly Window Syndrome withholding the ACK until the receiver drains
+    half its buffer -- with a runnable C++ proof at the end.
 
   [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
     2026-07-15 . tcp, kernel, rfc-2140
@@ -43,9 +65,6 @@
     2026-07-15 . concurrency, threads, cpp
 
   [Lesson 8: Total Data Loss (The Power Outage Bug)](posts/lesson-8-total-data-loss-the-power-outage-bug.txt)
-    2026-07-15 . concurrency, threads, cpp
-
-  [Lesson 9: The Missing Break Clause Crash](posts/lesson-9-the-missing-break-clause-crash.txt)
     2026-07-15 . concurrency, threads, cpp
 
   [Lesson 10: The Real-Time Background Worker Proof](posts/lesson-10-the-real-time-background-worker-proof.txt)
@@ -102,31 +121,7 @@
   [Lesson 27: — AssignmentSystem: Industry & Academic Validation](posts/lesson-27-assignmentsystem-industry-academic-validation.txt)
     2026-07-15 . concurrency, threads, cpp
 
-  [Mistake 1: Missing iostream include in v1.cpp](posts/mistake-1-missing-iostream-include-in-v1cpp.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 2: C++ string comparison logic strcmp == 0](posts/mistake-2-c-string-comparison-logic-strcmp-0.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 3: Missing include and syntax errors](posts/mistake-3-missing-include-and-syntax-errors.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 4: strcpy vs strncpy signature](posts/mistake-4-strcpy-vs-strncpy-signature.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 5: open system call parameters](posts/mistake-5-open-system-call-parameters.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 6: File overwriting and O_TRUNC](posts/mistake-6-file-overwriting-and-otrunc.txt)
-    2026-07-15 . network, socket, ipc
-
   [Mistake 7: Partial writes](posts/mistake-7-partial-writes.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 8: File existence for reading](posts/mistake-8-file-existence-for-reading.txt)
-    2026-07-15 . network, socket, ipc
-
-  [Mistake 9: Buffer overflow on string termination](posts/mistake-9-buffer-overflow-on-string-termination.txt)
     2026-07-15 . network, socket, ipc
 
   [Mistake 10: Polling vs Blocking](posts/mistake-10-polling-vs-blocking.txt)

@@ -267,7 +267,7 @@ while (total < 3000000) {
   RFC 2140 (TCP Control Block Interdependence) explains why. Modern kernels cache the
   TCP Congestion Window (cwnd) and Slow Start Threshold (ssthresh) not per connection,
   but per route or network interface. All loopback addresses (127.0.0.0/8) share one
-  interface. When Run 1 proved that interface was fast, the kernel updated its heuristic
+  interface. When Run 1 measured zero loss on that interface, the kernel updated its heuristic
   cache for the entire subnet. Run 2, a brand-new process with no relationship to Run 1,
   inherited that warmed-up state. When Run 3's consumer slept for 13 seconds (a slow
   reader), the kernel penalised the interface, shrinking the window for Runs 4 and 5.

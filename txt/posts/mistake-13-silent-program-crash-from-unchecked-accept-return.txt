@@ -179,7 +179,7 @@ Run 5 (127.0.0.5): 2,981,888 bytes (+ 9x 212,992)
 
   Because `127.0.0.1`, `127.0.0.2`, and `127.0.0.3` all belong to the `127.0.0.0/8` subnet, they all route through the exact same Virtual Loopback Interface.
 
-  When Run 1 proved the loopback interface was fast, the global Kernel updated its heuristic cache for the entire interface. When Run 2 (a brand new C++ process) connected to `127.0.0.2`, the Kernel instantly applied the "warmed up" metrics from Run 1, granting it a massive TCP window. When the consumer application slept for 13 seconds (proving to be a "slow reader"), the Kernel punished the interface, mathematically shrinking the window back down by Runs 4 and 5 to prevent buffer bloat.
+  When Run 1 measured zero loss and sub-millisecond ACKs on the loopback interface, the global Kernel updated its heuristic cache for the entire interface. When Run 2 (a brand new C++ process) connected to `127.0.0.2`, the Kernel instantly applied the "warmed up" metrics from Run 1, granting it a massive TCP window. When the consumer application slept for 13 seconds (proving to be a "slow reader"), the Kernel punished the interface, mathematically shrinking the window back down by Runs 4 and 5 to prevent buffer bloat.
 
   --------
   WE BIND OUR THREADS TO REALITY

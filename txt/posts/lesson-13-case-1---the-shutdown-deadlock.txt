@@ -38,7 +38,7 @@ cv_.wait(lock, [this]() { return !log_queue_.empty(); });
   1. The server is completely idle. No users are hitting the website. The `log_queue_` is completely **empty**.
   2. `main()` finishes and calls the destructor `~Logger()`.
   3. `~Logger()` acquires the lock, sets `stop_ = true`, unlocks, and calls `notify_one()` to wake up the background thread.
-  4. `~Logger()` then calls `background_writer_.join()`. This means `main()` physically halts and says: *"I will wait right here until the background thread finishes its work and dies."*
+  4. `~Logger()` then calls `background_writer_.join()`. This means `main()` halts and says: *"I will wait right here until the background thread finishes its work and dies."*
 
   --------
   FATAL FLAW LURKS IN THE DESTRUCTOR

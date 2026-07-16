@@ -44,7 +44,7 @@ std::queue<std::function<void()>> tasks;
 ```text
 tasks.push([this, socket] { handleClient(socket); });
 ```
-  The compiler actually constructs the `ServerLambda` object, and then constructs a `std::function` object that takes ownership of it. The `std::function` object is what physically enters the queue.
+  The compiler actually constructs the `ServerLambda` object, and then constructs a `std::function` object that takes ownership of it. The `std::function` object is what enters the queue.
 
   --------
   WRAPPER'S OPERATOR()

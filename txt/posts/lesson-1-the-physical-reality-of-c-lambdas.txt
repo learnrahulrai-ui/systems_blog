@@ -67,7 +67,7 @@ __ServerLambda_1234 my_lambda(this, client_socket);
 
   Because `operator()` is a member function of the lambda class, it receives **its own hidden `this` pointer**—which points to the lambda object, NOT the Server.
 
-  Therefore, inside the lambda body, when it calls `handleClient`, it is physically executing:
+  Therefore, inside the lambda body, when it calls `handleClient`, it is executing:
 ```text
 this->captured_server->handleClient(this->captured_socket);
 ```

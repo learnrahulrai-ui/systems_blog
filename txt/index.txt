@@ -14,7 +14,10 @@
   are copied from the terminal, not guessed.
 
   >> START HERE:
+     [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
+     [Support and Consumer: How a Shared File Forced Us Into TCP](posts/support-consumer-shared-file-forced-tcp.txt)
      [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
+     [TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall](posts/tcp-under-pressure-connect-timeout-sws-blocking-wall.txt)
      [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
 
   [Lesson 1: The Physical Reality of C++ Lambdas](posts/lesson-1-the-physical-reality-of-c-lambdas.txt)
@@ -48,10 +51,6 @@
   [Lesson 8: Total Data Loss (The Power Outage Bug)](posts/lesson-8-total-data-loss-the-power-outage-bug.txt)
     2026-07-15 . special . concurrency, threads, cpp
     Because your lambda only allowed `Logger::processQueue()` to wake up when `stop_` became true, your server was running a "Flush-on-Shutdown" strategy. To simulate what happens when this carelessness meets reality, I built `experiment/todo4_power_o...
-
-  [Lesson 9: The Missing Break Clause Crash](posts/lesson-9-the-missing-break-clause-crash.txt)
-    2026-07-15 . special . concurrency, threads, cpp
-    You correctly set up the condition variable to wake up on logs or shutdown: But you asked: *"What if I remove the `if (stop_ && log_queue_.empty()) break;` line?"* I built `experiment/todo4_missing_break_bug.cpp` to simulate exactly this.
 
   [Lesson 10: The Real-Time Background Worker Proof](posts/lesson-10-the-real-time-background-worker-proof.txt)
     2026-07-15 . special . concurrency, threads, cpp
@@ -125,41 +124,9 @@
     2026-07-15 . special . concurrency, threads, cpp
     A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`. **All 5 core logic components are an EXACT MATCH with production systems used by millions of users.** - **What they build:** Thread Pool + Pr...
 
-  [Mistake 1: Missing iostream include in v1.cpp](posts/mistake-1-missing-iostream-include-in-v1cpp.txt)
-    2026-07-15 . special . network, socket, ipc
-    The function `support()` used `std::cout`, but `<iostream>` was not included in the file. Only `<stdio.h>` was included, which caused a compilation error.
-
-  [Mistake 2: C++ string comparison logic strcmp == 0](posts/mistake-2-c-string-comparison-logic-strcmp-0.txt)
-    2026-07-15 . special . network, socket, ipc
-    Used `if (strcmp(...))` which evaluates to true when the strings DO NOT match (since `strcmp` returns 0 on match). The correct C logic is `if (strcmp(...) == 0)`.
-
-  [Mistake 3: Missing include and syntax errors](posts/mistake-3-missing-include-and-syntax-errors.txt)
-    2026-07-15 . special . network, socket, ipc
-    Forgot to `#include <cstring>` for `strcmp`. Also missed the closing parenthesis `)` for the `if` conditions and a semicolon `;` after a function call. commit af83a8a1bba9bdf6a12c02da94adf7c83fbad52a Author: SysDes Admin <pizza@sysdes.local> Date:...
-
-  [Mistake 4: strcpy vs strncpy signature](posts/mistake-4-strcpy-vs-strncpy-signature.txt)
-    2026-07-15 . special . network, socket, ipc
-    Tried to pass 3 arguments (dest, src, len) to `strcpy`. This is the signature for `strncpy`. `strcpy` only takes 2 arguments (dest, src). commit 2e3e08f38c5718f59be8dc7a241b954d01117c37 Author: SysDes Admin <pizza@sysdes.local> Date: Tue Jul 14 21...
-
-  [Mistake 5: open system call parameters](posts/mistake-5-open-system-call-parameters.txt)
-    2026-07-15 . special . network, socket, ipc
-    commit 2e3e08f38c5718f59be8dc7a241b954d01117c37 Author: SysDes Admin <pizza@sysdes.local> Date: Tue Jul 14 21:51:39 2026 +0530 v2 complete. Logs: missing O_TRUNC leaves garbage, write can be partial, open(O_RDONLY) fails if missing.
-
-  [Mistake 6: File overwriting and O_TRUNC](posts/mistake-6-file-overwriting-and-otrunc.txt)
-    2026-07-15 . special . network, socket, ipc
-    If you `open` a file for writing without `O_TRUNC` (or `O_APPEND`), it overwrites from the beginning but leaves old garbage at the end if the new string is shorter than the old one.
-
   [Mistake 7: Partial writes](posts/mistake-7-partial-writes.txt)
     2026-07-15 . special . network, socket, ipc
     `write()` does not guarantee all bytes are written in one go. It returns the number of bytes written. Robust code must loop until `bytes_written == total_len`.
-
-  [Mistake 8: File existence for reading](posts/mistake-8-file-existence-for-reading.txt)
-    2026-07-15 . special . network, socket, ipc
-    `open(O_RDONLY)` will fail (return -1) if the file doesn't exist yet. The consumer must handle this if it starts before the support process. commit 2e3e08f38c5718f59be8dc7a241b954d01117c37 Author: SysDes Admin <pizza@sysdes.local> Date: Tue Jul 14...
-
-  [Mistake 9: Buffer overflow on string termination](posts/mistake-9-buffer-overflow-on-string-termination.txt)
-    2026-07-15 . special . network, socket, ipc
-    If you `read` exactly the size of your buffer (e.g., 256 bytes into a 256-byte array), writing `buffer[256] = '\0'` accesses out-of-bounds memory. Always read `sizeof(buffer) - 1`.
 
   [Mistake 10: Polling vs Blocking](posts/mistake-10-polling-vs-blocking.txt)
     2026-07-15 . special . network, socket, ipc
