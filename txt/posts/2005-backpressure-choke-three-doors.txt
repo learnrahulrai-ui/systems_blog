@@ -1,0 +1,213 @@
+@title 2005, Part Two: Three Doors Into a Fix That Worked and Froze the UI Anyway :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2005, PART TWO: THREE DOORS INTO A FIX THAT WORKED AND FROZE THE UI ANYWAY
+  2005, Part Two: Three Doors Into a Fix That Worked and Froze the UI Anyway
+  ============================================================================================
+
+
+  [Part one](2005-head-of-line-three-doors.txt) ended with a queue between the network and
+  the disk, and the arithmetic of its death: absorbing 4900 surplus messages per second, a
+  512 MB machine has 18 minutes before the operating system kills the process. The cap that
+  prevents that death is one if statement: when the queue is full, stop listening to the
+  clients. This post walks what that if statement does to a person sitting at a keyboard,
+  four buffers away.
+
+  Part of the year-by-year series: [part one](2005-head-of-line-three-doors.txt) came before
+  this; [2006](2006-detach-data-loss-three-doors.txt) comes next; the whole arc is in
+  [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: TWO FACTS, NOTHING ELSE ASSUMED
+  Fact one: every TCP acknowledgment carries a number alongside it -- "this many more bytes I
+  am able to accept" -- which is simply the free space left in the receiver's kernel buffer.
+  The sender's kernel never transmits more than that number allows. When the number reaches
+  zero, the sender's kernel stops transmitting, silently, with no error raised on either
+  side. Fact two: when a program calls send() and gets a success return, that means one thing
+  only -- "my own local kernel accepted these bytes into its buffer." It does not mean the
+  bytes crossed the network, and it does not mean anyone read them
+  ([TCP: The Whole Contract](tcp-the-whole-contract.txt) measured this the hard way, 100 MB
+  written, 638,976 accepted). Every line below is these two facts colliding.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     the guard: clients only get FD_SET into select() while the queue has room
+door 2: HAPPY user    queue below the cap; recv() runs; the ACK comes back; UI says Delivered
+door 3: ANGRY user    the disk is seconds behind, the queue is full, and an ordinary user hits Enter
+```
+
+  --------
+  THE GUARD, FROM DOOR 1
+```text
+if ( pending_queue.size() < MAX_QUEUE_SIZE ) {
+    for ( u_int k = 0 ; k < master_set.fd_count; k++ ) {
+        if ( master_set.fd_array[k] != server_fd )
+            FD_SET(master_set.fd_array[k], &read_fds);
+    }
+}
+int activity = select(0, &read_fds, NULL, NULL, NULL);
+```
+  When the queue is full, the client sockets are simply never armed for this pass of the
+  loop. The server does not reject anyone, does not answer anyone, does not error at anyone.
+  It just declines to listen. In the committed run MAX_QUEUE_SIZE is 1, chosen so a single
+  pending message trips the guard instantly and the whole chain below happens on the first
+  keystroke instead of the ten-thousandth.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  The strange thing about this design is what it does NOT contain: no code anywhere refuses
+  the flood. No error is sent, no connection is closed, no message says "slow down." Yet the
+  flood stops, all the way back at the sender's machine. Trace the chain: the application
+  stops calling recv() on a socket -- name each buffer the arriving bytes pile into after
+  that, in order, and name the moment the sender's own send() call finally stops accepting
+  bytes. There are exactly four dominoes.
+
+  --------
+  THE ANSWER, TRACED
+  1. The server application stops calling recv(). Arriving bytes have nowhere to go but the
+     server's kernel receive buffer, which holds about 212 KB on Windows and fills.
+  2. Each acknowledgment the server's kernel sends back advertises the shrinking free space,
+     until it advertises zero. This is the window from fact one, hitting empty.
+  3. The client's kernel, seeing zero, stops transmitting. Bytes the client's application
+     writes now pile into the client's own kernel send buffer, which fills.
+  4. The client's next send() call has nowhere to put its bytes and blocks inside the call.
+  Four dominoes, and not one line of application code refused anything. The refusal to read,
+  alone, propagated backward across the network and stopped the sender's keyboard. That
+  backward-propagating stop is called backpressure, and it is genuinely the correct fix for
+  the queue's 18-minute death: the queue can no longer grow past its cap, because the excess
+  is parked in kernel buffers on both machines instead of in the server's RAM.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- WHAT THE HUMAN SEES AT EACH DOMINO
+  Same four dominoes, viewed from the client application. It sends message after message and
+  then waits up to 2 seconds for each ACK. For a message parked at domino 3 -- accepted by
+  the client's own kernel, never transmitted -- what did send() return at the moment of
+  sending? What does the client's 2-second wait then do? Say out loud what the UI shows for
+  that message, and for how long.
+
+  --------
+  THE ANSWER, TRACED
+  send() returned success -- fact two: the local kernel took the bytes, so the call is
+  satisfied. The client application therefore believes the message is on its way and waits
+  for the ACK. No ACK can come: the server never read the payload, so the server does not
+  know the message exists. The 2-second wait expires, and the client prints the line the
+  real run printed:
+```text
+[Client] FATAL: Timeout! ACK lost. UI will permanently say 'Sending...'
+```
+  Nobody told the client the server was busy. Nothing errored on either machine. The
+  connection just went quiet, and the UI froze on "Sending..." -- indefinitely, because
+  every retry lands in the same choked pipe. The fix that saved the server's RAM works by
+  making the client blind.
+
+  --------
+  SEAM. The reasoning ends here; below, the four dominoes checked in C++.
+
+  The buffer capacities are scaled down to single messages so each domino is one printed
+  line -- the app queue holds 1 (the committed run's real cap), each kernel buffer holds 2.
+  The claim being checked is the chain and who learns what, not the byte counts:
+
+```cpp
+#include <cstdio>
+
+int app_queue_used = 0;
+int server_kernel_used = 0;
+int client_kernel_used = 0;
+
+const int APP_QUEUE_CAP = 1;
+const int SERVER_KERNEL_CAP = 2;
+const int CLIENT_KERNEL_CAP = 2;
+
+void send_one(int n) {
+    if (app_queue_used < APP_QUEUE_CAP) {
+        app_queue_used = app_queue_used + 1;
+        printf("message %d: reached the app queue, ACK returned -> UI says Delivered\n", n);
+        return;
+    }
+    if (server_kernel_used < SERVER_KERNEL_CAP) {
+        server_kernel_used = server_kernel_used + 1;
+        printf("message %d: stuck in the SERVER kernel buffer, send() returned success -> UI says Sending...\n", n);
+        return;
+    }
+    if (client_kernel_used < CLIENT_KERNEL_CAP) {
+        client_kernel_used = client_kernel_used + 1;
+        printf("message %d: stuck in the CLIENT kernel buffer, send() returned success -> UI says Sending...\n", n);
+        return;
+    }
+    printf("message %d: send() itself blocks, every buffer is full -> the app freezes mid-call\n", n);
+}
+
+int main() {
+    send_one(1);
+    send_one(2);
+    send_one(3);
+    send_one(4);
+    send_one(5);
+    send_one(6);
+    printf("ACKs the client ever received: 1 of 6\n");
+    printf("sends that reported success: 5 of 6\n");
+    return 0;
+}
+```
+
+  Running this prints:
+
+      message 1: reached the app queue, ACK returned -> UI says Delivered
+      message 2: stuck in the SERVER kernel buffer, send() returned success -> UI says Sending...
+      message 3: stuck in the SERVER kernel buffer, send() returned success -> UI says Sending...
+      message 4: stuck in the CLIENT kernel buffer, send() returned success -> UI says Sending...
+      message 5: stuck in the CLIENT kernel buffer, send() returned success -> UI says Sending...
+      message 6: send() itself blocks, every buffer is full -> the app freezes mid-call
+      ACKs the client ever received: 1 of 6
+      sends that reported success: 5 of 6
+
+  The gap between the last two numbers is the entire problem: five sends reported success,
+  one message was actually acknowledged, and the client has no way to tell messages 2
+  through 5 apart from messages that are genuinely in flight. Success from send() measured
+  nothing but the distance to its own kernel.
+
+  --------
+  THE NAME THIS FAILURE ALREADY HAD
+  In 2001, Matt Welsh's SEDA thesis described staged servers connected by exactly these
+  bounded queues, and warned about exactly this: if a stage sheds load by silently refusing
+  to read, the refusal is invisible to the layers above -- the client cannot render "server
+  busy, retry in a minute," because no such signal exists in a choked pipe. The signal has
+  to be explicit and live in the application protocol: read the request, answer "BUSY, come
+  back later" (HTTP's 503 with Retry-After is this exact idea), and THEN drop the work. The
+  transport-level choke still belongs underneath as the last line of defense -- but as the
+  only mechanism, it protects the server by sacrificing the person. TCP's window is flow
+  control for kernels; humans need flow control addressed to them.
+
+  --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  Rival one: "the ACK was sent but lost on the network" -- the Two Generals reading. The run
+  is on loopback, where nothing drops; and the server's own log never printed a [Network]
+  Received line for the choked message, so the server never parsed it, so no ACK was ever
+  created to lose. Rival two: "the server crashed." Part one's second stack trace is the
+  counter-evidence shape: the event loop sits alive inside select's kernel wait; and if you
+  simply wait for the disk to catch up, the queue drains, the guard re-arms the sockets, the
+  window reopens, and the parked bytes complete their journey with no retransmission asked
+  of the application. A crashed server cannot be cured by patience; this one is.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  Two open threads. First, the reopening itself: when the receiver's window has been zero
+  for a while, the sender's kernel does not just hope -- it sends periodic probe segments to
+  ask whether space opened up. I know these persist-timer probes exist; I have never
+  captured one on the wire and watched its timing. Second, what real chat products actually
+  do at this boundary -- whether they ACK on enqueue or on durable write, and whether their
+  overload answer is an explicit busy signal or a silent client-side retry loop. The
+  [2006 post](2006-detach-data-loss-three-doors.txt) picks up the first half of that
+  question: what an ACK sent on enqueue is worth when the process dies.
+
+  >> STANDARD NAMES
+     refusing to read so the flood stops itself, buffer by buffer -> backpressure
+     the receiver advertising zero free bytes -> a TCP zero window
+     send() success that only means "my kernel took it" -> the write illusion
+     an explicit BUSY answer in the protocol instead of a silent choke -> application-layer
+     signaling (SEDA, 2001; HTTP 503 + Retry-After)

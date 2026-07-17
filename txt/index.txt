@@ -49,6 +49,24 @@
     message landing in the wrong person's inbox -- traced line by line, then the
     self-describing-message fix that makes physical file order stop mattering at all.
 
+  [2005: Three Doors Into a Server That Freezes Everyone for One Disk Write](posts/2005-head-of-line-three-doors.txt)
+    2026-07-17 . special . head-of-line, event-loop, queue, cdb, minicom
+    One thread serving every socket picks up a second job -- the disk -- and a real cdb
+    stack trace photographs the whole server standing inside one write. The queue that
+    fixes it buys a 512 MB machine exactly 18 minutes of life, arithmetic checked in C++.
+
+  [2005, Part Two: Three Doors Into a Fix That Worked and Froze the UI Anyway](posts/2005-backpressure-choke-three-doors.txt)
+    2026-07-17 . special . backpressure, tcp-zero-window, seda, minicom
+    Capping the queue stops the flood through four silent dominoes ending at a zero TCP
+    window -- and leaves the client's UI saying "Sending..." forever. Matt Welsh's 2001
+    SEDA warning, rediscovered one buffer at a time.
+
+  [2006: Three Doors Into Messages That Vanished Holding a Delivery Receipt](posts/2006-detach-data-loss-three-doors.txt)
+    2026-07-17 . special . join, detach, graceful-shutdown, data-loss, minicom
+    Ctrl+C kills a detached consumer thread mid-write and vaporizes messages the server
+    already confirmed as delivered -- join versus detach checked in a compiled proof, then
+    the four-piece shutdown that drains the queue before main is allowed to leave.
+
   [Lesson 1: The Physical Reality of C++ Lambdas](posts/lesson-1-the-physical-reality-of-c-lambdas.txt)
     2026-07-15 . special . concurrency, threads, cpp
     C++ lambdas appear to be magic "inline functions," but structurally, they are nothing more than standard C++ classes generated silently by the compiler.
@@ -153,42 +171,10 @@
     2026-07-15 . special . concurrency, threads, cpp
     A complete **live chat agent routing engine** inside `mini-server/src/assignment.cpp` and `assignment.h`. **All 5 core logic components are an EXACT MATCH with production systems used by millions of users.** - **What they build:** Thread Pool + Pr...
 
-  [Mistake 7: Partial writes](posts/mistake-7-partial-writes.txt)
-    2026-07-15 . special . network, socket, ipc
-    `write()` does not guarantee all bytes are written in one go. It returns the number of bytes written. Robust code must loop until `bytes_written == total_len`.
-
-  [Mistake 10: Polling vs Blocking](posts/mistake-10-polling-vs-blocking.txt)
-    2026-07-15 . special . network, socket, ipc
-    Using a standard file for real-time IPC requires the consumer to spin in an infinite loop (`while(true) read()`), which burns 100% CPU (polling). Real IPC needs blocking primitives (like sockets or pipes) that put the thread to sleep until data ar...
-
-  [Mistake 11: The TIME_WAIT / EADDRINUSE bind bug](posts/mistake-11-the-timewait-eaddrinuse-bind-bug.txt)
-    2026-07-15 . special . network, socket, ipc
-    If a server closes a connection and exits, the OS holds the port in a TIME_WAIT state to catch delayed packets. Restarting the server instantly throws "Address already in use".
-
-  [Mistake 12: The Ghost Connection ECONNABORTED accept bug](posts/mistake-12-the-ghost-connection-econnaborted-accept-bug.txt)
-    2026-07-15 . special . network, socket, ipc
-    The OS completes the TCP handshake *before* your code calls `accept()`. If a client connects and then instantly sends a kill signal (Ctrl+C) before `accept()` runs, the connection dies in the queue.
-
-  [Mistake 13: Silent program crash from unchecked accept return](posts/mistake-13-silent-program-crash-from-unchecked-accept-return.txt)
-    2026-07-15 . special . network, socket, ipc
-    `accept()` can fail and return `-1` (due to non-blocking empty queues, or aborted connections). If you don't check `if (client_fd == -1)`, your C++ program will blindly run `write(-1, ...)`, which causes the OS to silently fail the write and kill ...
-
-  [Mistake 14: Blocking vs Non-Blocking accept Behavior](posts/mistake-14-blocking-vs-non-blocking-accept-behavior.txt)
-    2026-07-15 . special . network, socket, ipc
-    - **Blocking (No `fcntl`)**: `accept()` waits FOREVER for a client. The only way it stops is if a client connects, or you manually kill the server with `Ctrl+C`.
-
-  [Mistake 15: File Descriptor Leak EMFILE](posts/mistake-15-file-descriptor-leak-emfile.txt)
-    2026-07-15 . special . network, socket, ipc
-    Forgetting to `close()` the socket after handling a client permanently leaks the file descriptor integer (e.g., 4, 5, 6...). The process eventually hits the OS limit and `accept()` fails with `EMFILE`.
-
-  [Mistake 16: TCP TIME_WAIT Port Exhaustion & SO_LINGER The HTTP/1.0 Problem](posts/mistake-16-tcp-timewait-port-exhaustion-solinger-the-http10-problem.txt)
-    2026-07-15 . special . network, socket, ipc
-    When the server closes a socket, the OS kernel stubbornly hoards the socket in RAM in the `TIME_WAIT` state for 2-4 minutes to catch delayed packets. In the 90s, HTTP/1.0 servers (which closed every connection) would crash after hoarding 65,535 po...
-
-  [Mistake 17: Partial Reads and Kernel Buffers The 212KB Wall](posts/mistake-17-partial-reads-and-kernel-buffers-the-212kb-wall.txt)
-    2026-07-15 . special . network, socket, ipc
-    The OS does not wait for a full `read()` request to arrive. If you request 3MB, the OS simply returns whatever is currently in the Kernel Receive Buffer (max ~212KB on Windows) and instantly returns control to you.
-
-  [Mistake 18: The Illusion of write Return Values Data in Flight](posts/mistake-18-the-illusion-of-write-return-values-data-in-flight.txt)
-    2026-07-15 . special . network, socket, ipc
-    When `write(100MB)` returns `638,976`, it DOES NOT mean the consumer received that data. It only means the local OS Kernel *accepted* 638KB into its Send Buffer.
+  The socket-era mistake write-ups that used to sit here as ten standalone stubs now live
+  inside the posts that tell their stories: partial writes and the polling wall are in
+  [Support and Consumer](posts/support-consumer-shared-file-forced-tcp.txt); TIME_WAIT,
+  ghost connections, the silent SIGPIPE death, blocking accept(), the FD leak, SO_LINGER,
+  the 212KB read wall, and the write() illusion are all in
+  [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt), each with its two-terminal
+  demo and the commit that logged it.

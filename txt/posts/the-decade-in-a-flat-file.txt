@@ -25,6 +25,10 @@
   [2001, the accidentally correct parser](2001-accidental-parser-three-doors.txt) ·
   [2002, the stale index](2002-stale-index-three-doors.txt) ·
   [2003, the fragmentation breach](2003-fragmentation-breach-three-doors.txt).
+  The story continues past this post's ending, into the server years:
+  [2005, head-of-line blocking](2005-head-of-line-three-doors.txt) ·
+  [2005 part two, the choke that froze the UI](2005-backpressure-choke-three-doors.txt) ·
+  [2006, the messages detach() ate](2006-detach-data-loss-three-doors.txt).
 
   --------
   FIRST, THE ONE FACT EVERYTHING ELSE FOLLOWS FROM

@@ -1,0 +1,229 @@
+@title 2005: Three Doors Into a Server That Freezes Everyone for One Disk Write :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2005: THREE DOORS INTO A SERVER THAT FREEZES EVERYONE FOR ONE DISK WRITE
+  2005: Three Doors Into a Server That Freezes Everyone for One Disk Write
+  ============================================================================================
+
+
+  2003 fixed the routing: every message carries its own conversation ID, and a map keyed by
+  that ID puts it where it belongs no matter where it landed on disk. The server carrying that
+  fix is the 1999 machine: one thread, one select() loop, every connected socket served in
+  turn. This year that one thread gets a second job -- saving every message to a spinning
+  magnetic disk as it arrives -- and the whole year is the story of one line of code that put
+  both jobs on the same thread.
+
+  Part of the year-by-year series: [2003](2003-fragmentation-breach-three-doors.txt) came
+  before this; [part two of 2005](2005-backpressure-choke-three-doors.txt) comes next; the
+  whole arc is in [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: ONE WORD, NOTHING ELSE ASSUMED
+  The word is "blocking." A thread is one lane of execution: it runs one statement at a time,
+  and the next statement does not start until the current one finishes. A statement is
+  blocking when the thread stands inside it until it completes -- a 10 ms disk write means
+  10 ms during which that thread executes nothing else at all. The 1999 event loop is ONE
+  thread serving every socket: select() tells it which socket has data, it handles that one,
+  and it loops. So whatever that single thread is standing inside of, every connected client
+  is standing inside of too. That is the entire post; the rest is watching it happen.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> run_c10k_server() -> select() loop -> recv() -> save_message_to_disk()
+door 2: HAPPY user    one user, one message; a 10 ms disk write; the ACK comes back; nobody else online
+door 3: ANGRY user    Alice hits Enter while the server is inside Bob's disk write
+```
+  Door 3 is not misbehavior, again. Two people sending messages within five seconds of each
+  other is the least surprising thing a chat server will ever experience.
+
+  --------
+  THE WRITE, FROM DOOR 1
+```text
+int valread = recv(s, buffer, 1024, 0);
+...
+save_message_to_disk(message);        <- called from inside the select() loop
+send(s, "ACK\n", 4, 0);
+
+void save_message_to_disk(string raw_message) {
+    std::ofstream outfile("intercom_db.txt", std::ios::app | std::ios::binary);
+    outfile << raw_message << "\n";
+    outfile.flush();
+    Sleep(5000);       <- stands in for the platter: seek plus rotation, exaggerated
+}                         from ~10 ms to 5 s so a human can watch the freeze happen
+```
+  The Sleep is this year's planted exaggeration. A real magnetic write costs around 10
+  milliseconds of head seek and platter rotation; 5000 ms is the same event slowed down five
+  hundred times so the failure is visible to the naked eye. Nothing about the structure
+  changes with the number.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2, one quiet user: trace recv, then the disk write, then the ACK, in that order. Two
+  questions. First: what does the user experience -- where does the 10 ms go? Second, and
+  worth pausing on: this design has a genuine virtue that the fix below will quietly destroy.
+  The ACK leaves the server AFTER the disk write returns. What is that ordering worth,
+  precisely, to the person who receives the ACK?
+
+  --------
+  THE ANSWER, TRACED
+  The user pays the disk latency inside their round trip: Enter, 10 ms of platter, ACK,
+  "Delivered." Tolerable, invisible even. And the ordering is worth this: when the client
+  sees "Delivered," the message has already been handed to the disk. An ACK that arrives
+  after the write is a receipt backed by stored bytes. Hold that thought -- it is the one
+  property this year trades away without noticing, and a later year
+  ([2006](2006-detach-data-loss-three-doors.txt)) pays for it.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- WHERE IS ALICE'S MESSAGE DURING BOB'S WRITE
+  Door 3. Bob's message arrived first; the server thread is inside save_message_to_disk, two
+  seconds into the five. Alice hits Enter. Her bytes cross the network fine. Trace where they
+  stop, and name the exact statement the server's one thread is standing in while she waits.
+  Then answer the sharper version: how many OTHER clients are frozen right now, and why is
+  the answer "all of them" rather than "the ones talking to Bob"?
+
+  --------
+  THE ANSWER, WATCHED IN A DEBUGGER, NOT ASSERTED
+  Alice's bytes reach the server machine and sit in its kernel receive buffer. Nobody calls
+  recv() -- the only thread that ever calls recv() is standing inside Sleep(5000). select()
+  is not running either, for the same reason: the loop that calls it is occupied. Every
+  client is frozen, because every client is served by the same single lane.
+
+  Here is the server, mid-freeze, under cdb (the Windows debugger), with a breakpoint planted
+  inside the disk write. The recipe: cdb -c "$<script" y2005.exe server, where the script is
+  g; k 10; q -- run, print ten stack frames, quit. Read a stack top-down: the top line is
+  where the thread stands right now; each line below it is the caller who is waiting for the
+  line above to finish:
+```text
+Child-SP          RetAddr               Call Site
+00000024`472fe930 00007ff6`aebc1df8     y2005!save_message_to_disk+0x5d
+00000024`472fea80 00007ff6`aebc23d5     y2005!run_c10k_server+0x448
+00000024`472ff590 00007ff6`aec60acf     y2005!main+0xc5
+(Inline Function) --------`--------     y2005!invoke_main+0x22
+00000024`472ff760 00007ffc`acb9257d     y2005!__scrt_common_main_seh+0x10f
+00000024`472ff7a0 00007ffc`aeeaaf08     KERNEL32!BaseThreadInitThunk+0x1d
+00000024`472ff7d0 00000000`00000000     ntdll!RtlUserThreadStart+0x28
+```
+  The disk write is standing directly on top of run_c10k_server, which is standing on top of
+  main. One thread, and it is on the disk. select() appears nowhere in this stack because it
+  cannot run: the thread that would call it is the thread doing the writing.
+
+  --------
+  SO THE FIX, ROUND ONE: PUT A QUEUE BETWEEN THE NETWORK AND THE DISK
+  The event loop stops calling save_message_to_disk. It pushes each message into an in-memory
+  pending queue and immediately returns to select(). A second thread -- the consumer -- pops
+  messages off that queue and does the slow disk writes on its own time:
+```text
+event loop:   recv() -> pending_queue.push_back(message) -> send ACK -> back to select()
+consumer:     pop front of pending_queue -> save_message_to_disk() -> repeat
+```
+  Same server, same planted breakpoint, one run later. This time the debugger catches TWO
+  threads at the same instant:
+```text
+thread 3 (the consumer), stopped inside the disk write:
+    y2005!save_message_to_disk+0x5d
+
+thread 0 (the event loop), at that same moment:
+Child-SP          RetAddr               Call Site
+00000097`d55aed48 00007ffc`aacb898f     ntdll!NtWaitForSingleObject+0x14
+00000097`d55aed50 00007ffc`aacb1f74     mswsock!SockWaitForSingleObject+0x10f
+00000097`d55aede0 00007ffc`ae962ad2     mswsock!WSPSelect+0x854
+00000097`d55aef90 00007ff6`143c2406     WS2_32!select+0x152
+00000097`d55af070 00007ff6`143c2d85     y2005!run_c10k_server+0x306
+00000097`d55afb60 00007ff6`14464bbf     y2005!main+0xc5
+```
+  The event loop thread is parked inside the kernel's own wait, underneath select(), ready
+  for the next client, WHILE the disk write happens on thread 3. That is the fix, not
+  claimed but photographed. The live run's scoreboard says the same thing:
+```text
+[Client] Message marked as Delivered! Received: ACK
+
+|  Packets sent: 1  |====>|    RAM Queue: 1   |====>|   Disk Writes: 0  |
+```
+  Look closely at that line, because it is the trade: the client was told Delivered while
+  Disk Writes still reads zero. The ACK now certifies "your message is in the server's RAM,"
+  not "your message is on the disk." That downgrade is silent, and it is the subject of the
+  [2006 post](2006-detach-data-loss-three-doors.txt).
+
+  --------
+  ?? ONE MORE UNHAPPY DOOR: WHAT DOES THE QUEUE COST
+  The queue decoupled the network from the disk. Now run the flood: clients pour in 5000
+  messages per second, and the disk can complete one write per 10 ms, forever. Name the thing
+  that grows, and name what finally stops it. Do the arithmetic before looking below -- how
+  long does a 512 MB machine survive?
+
+  --------
+  SEAM. The reasoning ends here; below, the arithmetic checked in C++.
+
+```cpp
+#include <cstdio>
+
+int main() {
+    long disk_ms_per_write = 10;
+    long max_writes_per_second = 1000 / disk_ms_per_write;
+    printf("disk: %ld ms per write -> at most %ld writes per second\n",
+           disk_ms_per_write, max_writes_per_second);
+
+    long arrivals_per_second = 5000;
+    long disk_work_ms_per_second = arrivals_per_second * disk_ms_per_write;
+    printf("flood: %ld messages per second -> %ld ms of disk work owed per 1000 ms of wall clock\n",
+           arrivals_per_second, disk_work_ms_per_second);
+
+    long queue_growth_per_second = arrivals_per_second - max_writes_per_second;
+    printf("queue growth: %ld messages per second\n", queue_growth_per_second);
+
+    long bytes_per_message = 100;
+    long ram_bytes = 512L * 1024L * 1024L;
+    long seconds_to_oom = ram_bytes / (queue_growth_per_second * bytes_per_message);
+    printf("512 MB of RAM is gone in %ld seconds (%ld minutes)\n",
+           seconds_to_oom, seconds_to_oom / 60);
+    return 0;
+}
+```
+
+  Running this prints:
+
+      disk: 10 ms per write -> at most 100 writes per second
+      flood: 5000 messages per second -> 50000 ms of disk work owed per 1000 ms of wall clock
+      queue growth: 4900 messages per second
+      512 MB of RAM is gone in 1095 seconds (18 minutes)
+
+  The first number is the old design's death: asked to do 50 seconds of disk work every
+  second, the single-lane server falls 49 seconds further behind each second -- head-of-line
+  blocking with no exit. The last number is the new design's death: the queue absorbs the
+  difference, 4900 messages a second, one hundred bytes each, and a 512 MB machine has 18
+  minutes to live before the operating system kills the process for eating all the RAM. The
+  fix did not remove the imbalance between network speed and disk speed; it chose which
+  resource pays for it, and chose RAM.
+
+  --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  Rival one: "the freeze was network latency, not the disk." The stack trace kills it -- the
+  frozen thread stands in save_message_to_disk, not in any socket call, and Alice's bytes
+  had already arrived in the kernel buffer. Rival two: "select() itself is too slow at this
+  load." Then moving the write to another thread should not have helped; instead the second
+  trace shows thread 0 idle inside select's kernel wait under the identical load. Rival
+  three: "Sleep(5000) makes the whole demo fake." The sleep scales the freeze from 10 ms to
+  5 s so it can be photographed; the thing being proven is the geometry -- WHOSE thread
+  stands in the write -- and that geometry is identical at any duration. A real 10 ms write
+  freezes every client for 10 ms by exactly this mechanism, 100 times per second.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  The code says outfile.flush() and the comment beside it claimed the bytes were on the
+  platter. That claim is not true as written: flush() hands the bytes from the program's
+  buffer to the operating system, and Windows keeps its own disk cache, and the drive keeps
+  a cache below that. Whether a message that has been "flushed" can still be lost in a power
+  cut -- and what FlushFileBuffers or fsync actually guarantee on which hardware -- is a
+  trace I have not done. Every database's write-ahead-log discipline lives inside that exact
+  question, and this series has now walked far enough to need it.
+
+  >> STANDARD NAMES
+     one slow item freezing everyone behind it in a single lane -> head-of-line blocking
+     the in-RAM list between the network and the disk -> a producer/consumer queue
+     a queue with no maximum, growing until the OS kills you -> an unbounded queue (the OOM death spiral)
+     the two threads photographed mid-decoupling -> the cdb stack-pair proof

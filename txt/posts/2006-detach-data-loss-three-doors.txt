@@ -1,0 +1,192 @@
+@title 2006: Three Doors Into Messages That Vanished Holding a Delivery Receipt :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2006: THREE DOORS INTO MESSAGES THAT VANISHED HOLDING A DELIVERY RECEIPT
+  2006: Three Doors Into Messages That Vanished Holding a Delivery Receipt
+  ============================================================================================
+
+
+  The 2005 server ended the year in good shape: disk writes on their own consumer thread so
+  no client ever waits behind the platter, a capped queue so the flood parks in kernel
+  buffers instead of eating RAM. It survives load. This year, an administrator presses
+  Ctrl+C -- and the messages that die are precisely the ones the server had already
+  confirmed as delivered.
+
+  Part of the year-by-year series: [2005 part two](2005-backpressure-choke-three-doors.txt)
+  came before this; the whole arc is in
+  [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: ONE CHOICE, NOTHING ELSE ASSUMED
+  When a program starts a second thread, the starting thread eventually makes one of two
+  calls about it. join() means: stand here and wait until that thread finishes, however long
+  it takes. detach() means: let go -- the thread keeps running, but nobody will ever wait
+  for it again. One more fact completes the picture: when main returns, or the process is
+  killed, the operating system destroys every thread in the process mid-instruction and
+  reclaims all of its RAM. Detached threads get no warning and no farewell; whatever they
+  were halfway through simply stops existing. A children's version that holds up: telling a
+  friend to put the toys away and waiting at the door until they finish, versus telling them
+  and then locking the house while they are still holding the toys.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     std::thread consumer(...);  consumer.detach();   then main eventually exits
+door 2: HAPPY user    the server runs all day; the consumer drains the queue; nothing ever looks wrong
+door 3: ANGRY user    the admin stops the server while 3 messages sit in the queue, mid disk write
+```
+  Door 3's angry user is not even a chat user this time. It is whoever runs the server,
+  doing the single most routine thing an operator does: stopping it.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2 first, because it is the trap. For as long as the process is alive, a detached
+  consumer thread and a joined consumer thread execute identically -- same pops, same disk
+  writes, same timing. join() and detach() differ in exactly one thing, and that thing has
+  not happened yet. What is it, and what does that mean for how long this bug can sit in a
+  running system without once showing itself?
+
+  --------
+  THE ANSWER, TRACED
+  They differ only at the end: join versus detach decides what happens when the process
+  wants to exit, and nothing else. A server that runs for months without restarting will
+  execute the detached path flawlessly for months. The bug lives entirely inside the last
+  second of the process's life, which is the one second that testing-by-using-it never
+  visits. It was invisible in every demo of the 2005 server, because every demo ended with
+  the queue already empty.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- FOLLOW ONE MESSAGE THROUGH THE KILL
+  Door 3. Alice's message arrived thirty seconds ago. The event loop pushed it into the
+  pending queue and -- this is the 2005 design, decided back when it looked free -- sent the
+  ACK at that moment, on enqueue, before any disk write. Her UI said Delivered. The consumer
+  thread is now two seconds into the five-second write of an EARLIER message; Alice's is
+  still in the queue behind it. The admin presses Ctrl+C. Walk each actor: the process, the
+  RAM holding the queue, the detached consumer inside its write, the disk, and Alice's
+  screen. What does each one hold when the dust settles?
+
+  --------
+  THE ANSWER, TRACED
+  The process dies immediately -- nothing handles Ctrl+C, so the default handler terminates
+  it. The OS reclaims all RAM: the pending queue, Alice's message inside it, gone. The
+  detached consumer is destroyed mid-write; the earlier message it was flushing may be a
+  partial line on disk. The disk gains nothing further. After reboot, the database file has
+  no trace Alice's message ever existed. And Alice's screen still says Delivered -- the ACK
+  was real, sent by a live server that then took the only copy down with it. This is the
+  observed result from the real run, diagrammed at the time:
+```text
+          [ RAM (pending_queue) ]               [ Magnetic Disk ]
+          +-------------------+                 +---------------+
+Msg 1 --> | Msg 1 (vaporized) | --(blocking)--> |               |
+Msg 2 --> | Msg 2 (vaporized) |                 |     EMPTY     |
+Msg 3 --> | Msg 3 (vaporized) |                 |  (0 messages) |
+          +-------------------+                 +---------------+
+             ^                                       ^
+    Process killed!                        Thread vaporized before
+    RAM freed by OS.                       disk I/O completed.
+```
+  Data loss is bad; data loss with a receipt is worse, because nobody retries a message
+  their screen says was delivered. The loss is not merely unrecovered -- it is unreported,
+  permanently, by design of the ACK's timing.
+
+  --------
+  SEAM. The reasoning ends here; below, join versus detach checked in C++.
+
+  One flush function, needing 300 ms of pretend disk time to land 3 messages. Run it once on
+  a joined thread, once on a detached thread, and let the process exit. The only variable
+  that changes between the two halves is who waits at the end:
+
+```cpp
+#include <cstdio>
+#include <thread>
+#include <chrono>
+
+int messages_on_disk = 0;
+
+void flush_pending_queue() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    messages_on_disk = messages_on_disk + 3;
+    printf("consumer: flushed 3 messages to disk\n");
+}
+
+int main() {
+    std::thread consumer_join(flush_pending_queue);
+    consumer_join.join();
+    printf("after join: messages_on_disk = %d\n", messages_on_disk);
+
+    std::thread consumer_detach(flush_pending_queue);
+    consumer_detach.detach();
+    printf("after detach: messages_on_disk = %d\n", messages_on_disk);
+    return 0;
+}
+```
+
+  Running this prints:
+
+      consumer: flushed 3 messages to disk
+      after join: messages_on_disk = 3
+      after detach: messages_on_disk = 3
+
+  Read the output against the code. The flush line appears exactly ONCE, though the function
+  was started twice. The joined run waited 300 ms and its 3 messages landed. The detached
+  run started the same function, main reached return before the 300 ms elapsed, the process
+  tore down, and the second flush -- its increment, its printf, its messages -- never
+  happened anywhere. The counter still reads 3, not 6, in the detach line. Same function,
+  same disk, same data; the only difference in the whole program is which exit discipline
+  main used.
+
+  --------
+  SO THE FIX: FOUR PIECES, EACH ONE NECESSARY
+  The 2006 server survives Ctrl+C with zero loss, using four changes that only work
+  together:
+```text
+1. SetConsoleCtrlHandler(CtrlHandler, TRUE);      Ctrl+C now sets keep_running = false
+                                                   instead of killing the process
+2. select(0, &read_fds, NULL, NULL, &tv);          tv = 100 ms: a loop blocked FOREVER
+                                                   inside select can never notice any flag
+3. while ( keep_running || !pending_queue.empty() )   the consumer's condition: not "until
+                                                   told to stop" but "until told to stop
+                                                   AND the queue is drained"
+4. consumer.join();                                main is not allowed to leave first
+```
+  Trace the shutdown with all four in place: Ctrl+C flips the flag; within 100 ms the event
+  loop's select() times out, sees the flag, and exits; main prints its real farewell --
+  "Server shutting down, waiting for consumer thread to finish..." -- and stands at join();
+  the consumer keeps popping until the queue is empty, flushes the last message through the
+  full 5-second write, and only then finishes; join() returns; the process exits with the
+  disk holding everything it ever acknowledged. Remove any one piece and a hole reopens:
+  no handler and Ctrl+C kills instantly; no select timeout and the flag is never seen; no
+  drain condition and the consumer quits with messages still queued; no join and the drain
+  itself is vaporized mid-write.
+
+  --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  Rival one: "the messages were lost because the disk write failed." The compiled proof
+  kills it: the identical flush function lands its 3 messages when joined and loses them
+  when detached -- the disk never varied, the exit discipline did. Rival two: "Ctrl+C is
+  simply too violent for any code to survive; the loss was inevitable." The 2006 run is the
+  counterexample: it catches the same Ctrl+C, drains, and exits with nothing lost. The loss
+  was never inevitability. It was a default nobody had overridden.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  join() only fixes polite deaths. A power cut skips every handler, every drain, every
+  join -- and the ACK still went out on enqueue, before any disk write, so the receipt
+  problem survives this whole year's fix intact. The honest repair is to ACK only after the
+  message is durable on disk, which taxes every single message with a disk-latency round
+  trip; how real databases pay that bill in bulk -- write-ahead logs, group commit, batching
+  many ACKs behind one platter rotation -- is the trace this series has not done yet. One
+  smaller debt: the consumer's loop condition reads pending_queue.empty() without holding
+  the mutex. I believe the worst case is one harmless extra 10 ms lap of the loop, but I
+  have not proven it, and "I believe" is exactly the phrase this series exists to eliminate.
+
+  >> STANDARD NAMES
+     waiting for a thread to finish before the process exits -> join
+     releasing a thread to run unwaited-for -> detach
+     exit only after the queue is empty -> drain-then-exit (graceful shutdown)
+     confirmed to the client, not yet on disk, then lost -> acked-but-not-durable
+     (data loss with a receipt)

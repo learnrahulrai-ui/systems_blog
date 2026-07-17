@@ -131,6 +131,69 @@
   tail of a message; the fix is a loop that keeps calling write() with the
   remaining bytes until the total written equals len.
 
+  That partial write deserves its own picture, because write() looks like it
+  either writes everything or fails, and it does neither:
+
+```text
+  [process] --write(100 bytes)--> [kernel-owned buffer, only 40 bytes free]
+                                          |
+                                 returns 40 (a partial write)
+                                          |
+                    the remaining 60 bytes were never written -- caller must loop
+```
+
+  write() is a syscall handing bytes to a kernel-owned buffer, not a guarantee
+  the bytes reach their destination. If that buffer has less free space than the
+  request, the kernel copies what fits, returns that smaller count, and leaves
+  the rest for the caller to notice and retry. Nothing about the call fails --
+  the return value is the only signal that anything was incomplete. Code that
+  trusts write's return value to always equal what it asked for will silently
+  drop the tail of every write that doesn't fit in one pass. The standalone v2
+  demo of exactly this writer, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo partial_write_demo.cpp
+  ./demo support     -- writes "hello consumer" into chat.txt
+
+  #include <stdio.h>
+  #include <iostream>
+  #include <cstring>
+  #include <fstream>
+  #include <fcntl.h>
+  #include <unistd.h>
+
+  void support() {
+      int fd = open("chat.txt", O_WRONLY | O_CREAT, 0644);
+      if (fd == -1) {
+          perror("open failed");
+          return;
+      }
+
+      char buffer[256];
+      int len = strlen("hello consumer");
+      strcpy(buffer, "hello consumer");
+      write(fd, buffer, len);
+
+      close(fd);
+      std::cout << "Wrote \"hello consumer\" to chat.txt" << std::endl;
+  }
+
+  int main(int argc, char* argv[]) {
+      if (argc < 2) {
+          printf("Usage: ./demo <support|consumer>\n");
+          return 0;
+      }
+      if (strcmp(argv[1], "support") == 0) {
+          support();
+      }
+      return 0;
+  }
+```
+
+  The commit that logged the discovery, verbatim:
+  commit 2e3e08f38c5718f59be8dc7a241b954d01117c37 -- v2 complete. Logs: missing
+  O_TRUNC leaves garbage, write can be partial, open(O_RDONLY) fails if missing.
+
   Third: what happens if consumer runs before support has ever run, and calls
   open("chat.txt", O_RDONLY)? The file does not exist yet. open() returns -1
   and errno is set to ENOENT -- no such file or directory. There is no ordering
@@ -190,6 +253,59 @@
   write to the same file at the same moment, there is nothing stopping their
   writes from interleaving into a corrupted mess -- a plain file gives you no
   locking, no ordering, no signal.
+
+  The cost of polling against the cost of blocking, side by side:
+
+```text
+  consumer, polling:  while(true) -> read() -> returns -1/0 -> loop again immediately -> 100% CPU
+  consumer, blocking: read() -> no data -> OS puts the thread to sleep                -> 0% CPU
+                                              | (data arrives)
+                                      OS wakes the thread up
+```
+
+  A file descriptor for a socket or a pipe carries a readiness contract the
+  kernel can act on: no data means put this thread to sleep, and wake it the
+  instant data lands. A plain file descriptor carries no such contract --
+  read() on a file returns immediately whether there is new data or not,
+  because "new data" was never something the filesystem was built to signal.
+  That is why the consumer's only option, checking a plain file, is a while
+  loop calling read() as often as the CPU can execute it -- 100% of a core
+  spent checking a file that changes maybe once a second. The v3 reader this
+  was measured on, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo polling_reader_demo.cpp
+  ./demo support      -- terminal 1, writes chat.txt
+  ./demo consumer     -- terminal 2, reads chat.txt back
+
+  void consumer() {
+      int fd = open("chat.txt", O_RDONLY);
+      if (fd == -1) {
+          perror("open failed");
+          return;
+      }
+
+      char buffer[256];
+      int bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+
+      if (bytes_read == -1) {
+          perror("read failed");
+          close(fd);
+          return;
+      }
+
+      if (bytes_read > 0) {
+          buffer[bytes_read] = '\0';
+          std::cout << buffer << std::endl;
+      }
+
+      close(fd);
+  }
+```
+
+  The commit that logged it, verbatim:
+  commit e83e43aeca8ba561a8bc420fddf6fd5f1b7b9670 -- v3 complete. Logged buffer
+  overflow and CPU polling issues.
 
   ==============================================================================================
 
@@ -308,6 +424,10 @@ int main() {
      EOF              -> end of file; read() returns 0 (not -1) to signal it
      polling          -> repeatedly checking for a change with no way to be
                         notified when it happens; burns CPU with no work done
+     blocking         -> the OS parking a thread until data is actually ready;
+                        the thread costs 0% CPU while it waits
+     partial write    -> write() returning less than requested; the fix is a
+                        loop until bytes_written == total_len
 
   =========================================================================
 

@@ -194,6 +194,96 @@ int n = write(client_fd, buffer, 100000000);  // try to send 100MB
                                                up to 212,992 at a time
 ```
 
+  The illusion in that return value deserves its own statement, because reading
+  it wrong makes the program wrong before any other line runs:
+
+```text
+  write(100MB) ---> returns 638,976 (bytes accepted into the local kernel's send buffer)
+                             |
+                does NOT mean the consumer received them
+                             |
+         if the consumer aborts now, whatever was still in flight is gone
+```
+
+  write() is a syscall into this machine's own kernel. Its return value reports
+  what that local kernel accepted into its own send buffer -- a promise about
+  local memory, not about the network, and definitely not about the process on
+  the other end. Everything after that point -- the data actually crossing the
+  wire, the peer's kernel receiving it, the peer's application reading it --
+  happens on a timeline write() has already returned from and knows nothing
+  about. If the consumer aborts with an RST while bytes are still between the
+  two kernels, those bytes are gone, permanently, even though write() already
+  reported them as "written". The only way to know data truly arrived is a reply
+  from the other side -- an application-level acknowledgment -- not the return
+  value of the call that sent it.
+
+  The demo that measured it, one command, no Makefile (same loopback IP for
+  both terminals):
+
+```text
+  g++ -std=c++17 -o demo write_illusion_demo.cpp
+  ./demo support 127.0.0.1     -- terminal 1, pushes 100MB of random bytes
+  ./demo consumer 127.0.0.1    -- terminal 2, reads once, holds the socket open
+
+  void support(const char* ip) {
+      int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+      int opt = 1;
+      setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      inet_pton(AF_INET, ip, &address.sin_addr);
+      address.sin_port = htons(8080);
+
+      bind(server_fd, (struct sockaddr*)&address, sizeof(address));
+      listen(server_fd, 100);
+
+      int client_fd = accept(server_fd, nullptr, nullptr);
+
+      char* buffer = new char[100000000]; // 100MB
+      fill_random(buffer, 100000000);
+
+      int written_now = write(client_fd, buffer, 100000000);
+      sleep(2);
+
+      std::cout << "Server (IP " << ip << ") successfully pushed " << written_now
+                << " bytes into the network." << std::endl;
+
+      close(client_fd);
+      close(server_fd);
+      delete[] buffer;
+  }
+
+  void consumer(const char* ip) {
+      int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_port = htons(8080);
+      inet_pton(AF_INET, ip, &address.sin_addr);
+
+      connect(client_fd, (struct sockaddr *)&address, sizeof(address));
+
+      int requested_bytes = 3000000; // 3MB
+      char* buffer = new char[requested_bytes];
+
+      sleep(2);
+
+      int bytes_read = read(client_fd, buffer, requested_bytes);
+      std::cout << "Consumer read " << bytes_read
+                << " bytes, then holding the socket open..." << std::endl;
+
+      // deliberately NOT closing here -- lets data still in flight sit
+      // unread, which is exactly the "data in flight" state being measured
+      sleep(13);
+      delete[] buffer;
+  }
+```
+
+  The commit behind it, verbatim: commit 7e50f725b648a22b293864c960453642094d4c29
+  -- TCP window auto-tuner multi-IP cache experiments, a race condition fix, and
+  a Silly Window Syndrome demo, all from the same session that produced this
+  test's random 100MB payload and the deliberately-unclosed consumer socket.
+
   ==============================================================================================
 
   WHY read() NEVER RETURNS THE FULL AMOUNT YOU ASKED FOR
@@ -230,6 +320,89 @@ while (total < 3000000) {
   We measured the real numbers. Single read(), no loop, 2-second sleep to let data
   accumulate: got = 212,992. With a read loop until the server closes: total = 3,000,000.
   Without the loop: 2,787,008 bytes silently dropped.
+
+  The shape of that measurement, drawn out:
+
+```text
+  client requests 3MB via read() ---> kernel receive buffer has only ~212KB available
+                                               |
+                                    returns ~212KB instantly, call already done
+                                               |
+                         the remaining ~2.8MB requires calling read() again, and again
+```
+
+  This mirrors the partial-write trap exactly, from the other end of the same
+  socket. And 212KB is not a hardcoded constant anywhere in the code -- it is
+  whatever the OS's receive buffer for this connection happens to be sized at
+  the moment read() is called, a live value the kernel adjusts per connection.
+  The number in these runs lands near 212,992 bytes; the RFC 2140 section below
+  traces that exact figure back to per-route TCP window caching, and it can be
+  larger or smaller on a different run, a different route, or a different OS
+  entirely. What never changes is the contract: read() returns what is currently
+  available, not what was asked for, and the only code that reliably collects
+  everything is code written to expect that and loop.
+
+  The two-terminal demo that produced got = 212,992, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo partial_read_demo.cpp
+  ./demo support     -- terminal 1, single write() of 100MB, no loop
+  ./demo consumer    -- terminal 2, single read() asking for 3MB, no loop
+
+  void support() {
+      int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+      int opt = 1;
+      setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = INADDR_ANY;
+      address.sin_port = htons(8080);
+
+      bind(server_fd, (struct sockaddr*)&address, sizeof(address));
+      listen(server_fd, 100);
+
+      int client_fd = accept(server_fd, nullptr, nullptr);
+
+      char* buffer = new char[100000000]; // 100MB
+      memset(buffer, 'A', 100000000);
+
+      // single write, no loop -- push 100MB in one go
+      int written_now = write(client_fd, buffer, 100000000);
+      sleep(2);
+
+      std::cout << "Server successfully pushed " << written_now
+                << " bytes into the network." << std::endl;
+
+      close(client_fd);
+      close(server_fd);
+      delete[] buffer;
+  }
+
+  void consumer() {
+      int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_port = htons(8080);
+      inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+
+      connect(client_fd, (struct sockaddr *)&address, sizeof(address));
+
+      int requested_bytes = 3000000; // 3MB
+      char* buffer = new char[requested_bytes];
+
+      std::cout << "Consumer asking OS to read exactly 3,000,000 bytes..." << std::endl;
+      sleep(2);
+
+      // single read, no loop -- ask for all 3MB in one go
+      int bytes_read = read(client_fd, buffer, requested_bytes);
+
+      std::cout << "Consumer actually received: " << bytes_read << " bytes." << std::endl;
+
+      close(client_fd);
+      delete[] buffer;
+  }
+```
 
   ==============================================================================================
 
@@ -331,6 +504,93 @@ bind(server_fd, &address, sizeof(address));
   Note: Cygwin/Windows allows rebinding without SO_REUSEADDR on loopback. Linux does
   not. Write SO_REUSEADDR for every server socket. No exceptions.
 
+  The whole restart failure in three lines:
+
+```text
+  server exits ---> socket enters TIME_WAIT (2-4 minutes)
+  restart server ---> bind() to same port ---> error: EADDRINUSE
+  fix: setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))
+```
+
+  And to be precise about what the fix overrides: SO_REUSEADDR does not disable
+  TIME_WAIT's protection -- the parked sockets keep catching their stragglers.
+  It tells the OS this specific process is aware of the risk and wants to rebind
+  anyway, which is exactly what a server restarting in development needs and
+  exactly the difference between a clean restart and an EADDRINUSE crash. The
+  server half of the demo that hits it, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo timewait_bind_demo.cpp
+  ./demo support     -- terminal 1, binds port 8080, accepts one client
+  ./demo consumer    -- terminal 2, connects, reads the greeting
+
+  void support() {
+      int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+      if (server_fd == -1) {
+          perror("socket failed");
+          return;
+      }
+
+      // FIX 1: prevent the TIME_WAIT port binding failure
+      int opt = 1;
+      setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = INADDR_ANY;
+      address.sin_port = htons(8080);
+
+      if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) == -1) {
+          perror("bind failed");
+          close(server_fd);
+          return;
+      }
+
+      listen(server_fd, 100);
+
+      std::cout << "Support is waiting for a connection..." << std::endl;
+
+      int client_fd = accept(server_fd, nullptr, nullptr);
+
+      std::cout << "Accepted client on fd: " << client_fd << std::endl;
+      int write_res = write(client_fd, "hello consumer", 14);
+      if (write_res == -1)
+          std::cout << "accept passed ; but write failed";
+
+      struct linger sl;
+      sl.l_onoff = 1;
+      sl.l_linger = 0;
+      setsockopt(client_fd, SOL_SOCKET, SO_LINGER, (const char*)&sl, sizeof(sl));
+
+      close(client_fd);
+      close(server_fd);
+  }
+
+  void consumer() {
+      int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_port = htons(8080);
+      inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+      if (connect(client_fd, (struct sockaddr *)&address, sizeof(address)) == -1) {
+          perror("connect failed");
+          return;
+      }
+
+      char buffer[256];
+      int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+      if (bytes_read > 0) {
+          buffer[bytes_read] = '\0';
+          std::cout << buffer << std::endl;
+      } else if (bytes_read == 0) {
+          std::cout << "The server cleanly hung up (FIN)." << std::endl;
+      } else {
+          perror("Read failed (Who killed me?)");
+      }
+      close(client_fd);
+  }
+```
+
   ==============================================================================================
 
   THE ABORTIVE CLOSE -- SO_LINGER AND THE RST PACKET
@@ -364,6 +624,75 @@ close(client_fd);   // sends RST immediately
   connects and immediately fires a RST (mimicking Ctrl+C after connect but before any
   data). The server's accept() then returned -1 with ECONNABORTED on Linux.
 
+  The two ways to close, condensed to one picture:
+
+```text
+  normal close: close(fd) ---> sends FIN ---> enters TIME_WAIT (kernel holds port/RAM 2-4 min)
+  linger close: SO_LINGER (l_onoff=1, l_linger=0) ---> sends RST ---> connection vaporised instantly
+```
+
+  And the honest framing: skipping TIME_WAIT with SO_LINGER is a trade, not a
+  free fix. A FIN tells the peer the connection ended cleanly, in order, with
+  all data delivered. An RST tells the peer the connection was aborted -- any
+  data still in flight is discarded, and receiving an unexpected RST is exactly
+  what gets misread as a crash rather than a deliberate close. SO_LINGER trades
+  TIME_WAIT's port-hoarding cost for that risk: it belongs on high-churn,
+  short-lived connections where port exhaustion is the bigger danger, not as a
+  default for every socket a server closes. The demo that exercised both sides
+  of the trade, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo solinger_close_demo.cpp
+  ./demo support     -- terminal 1, accepts one client, pushes 100MB
+  ./demo consumer    -- terminal 2, reads exactly 3,000,000 bytes
+
+  void consumer() {
+      int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_port = htons(8080);
+      inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+
+      connect(client_fd, (struct sockaddr *)&address, sizeof(address));
+
+      int requested_bytes = 3000000;   // we want 3 megabytes
+      char* buffer = new char[requested_bytes];
+
+      std::cout << "Consumer asking OS to read exactly 3,000,000 bytes..." << std::endl;
+
+      int total_read = 0;
+      char* current_offset = buffer;
+
+      while (total_read < requested_bytes) {
+          int bytes_read = read(client_fd, current_offset, requested_bytes - total_read);
+          if (bytes_read == 0) {
+              std::cout << "\n[CONSUMER] read() returned 0! The Server gracefully hung up with a FIN!" << std::endl;
+              break;
+          }
+          if (bytes_read < 0) {
+              std::cout << "\n[CONSUMER] read() returned " << bytes_read
+                        << "! The Server crashed and fired an RST!" << std::endl;
+              break;
+          }
+          current_offset += bytes_read;
+          total_read += bytes_read;
+      }
+
+      std::cout << "Consumer actually received: " << total_read << " bytes." << std::endl;
+
+      close(client_fd);
+      delete[] buffer;
+  }
+```
+
+  Note the consumer's two break branches: a return of 0 is the FIN -- the clean
+  goodbye -- and a negative return is the RST. One reader, written once,
+  distinguishes a graceful close from an abort purely by which of those two
+  values read() hands back. The commit attached to this experiment, verbatim:
+  commit 66eec1c6d892a9338dd5e7c74cb8aacf65240f23 -- and its note is a process
+  correction, not a code note: draw the state in ASCII at every phase before
+  asking for the next step, the same discipline this post's diagrams follow.
+
   ==============================================================================================
 
   THE CLOSE_WAIT ZOMBIE -- WHAT HAPPENS WHEN THE SERVER FORGETS TO CLOSE
@@ -388,16 +717,126 @@ close(client_fd);   // sends RST immediately
   accept() returned -1. The server could not accept any more connections. No crash, no
   message -- just silent refusal to accept. Every real server must close(client_fd).
 
+  How the leak accumulates, one line:
+
+```text
+  accept() client ---> returns fd N ---> handle client ---> (no close(fd)) ---> leaks fd N
+  repeat 2048 times ---> hits the limit ---> accept() returns -1 with EMFILE ---> server breaks
+```
+
+  The part worth sitting with: the consumers in that stress test were perfectly
+  clean. Each one connected, received its data, and called close() correctly on
+  its own end. The server still leaked, because closing a socket is a two-sided
+  act -- the consumer's close() sends a FIN and releases the consumer's own
+  descriptor, but that only informs the server the peer is gone. It does not
+  force the server to release its side. Left unclosed, the server's socket sits
+  in CLOSE_WAIT, holding one descriptor slot, no matter how correctly the other
+  side behaved. A file descriptor is process-local: it frees instantly on
+  close(), but only on the close() that belongs to that process. One missing
+  close(client_fd) is a slow-burning fuse -- invisible for the first 2047
+  connections, fatal on the 2048th. The demo pair that lit the fuse, one
+  command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo fd_leak_demo.cpp
+  ./demo support     -- terminal 1, accepts forever, NEVER closes client_fd
+  ./demo consumer    -- terminal 2, fires 5000 clean connect+close cycles
+
+  void support() {
+      int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+      int opt = 1;
+      setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = INADDR_ANY;
+      address.sin_port = htons(8080);
+      bind(server_fd, (struct sockaddr*)&address, sizeof(address));
+
+      listen(server_fd, 2048); // massive backlog so the OS doesn't reject them
+
+      std::cout << "Support started. Accepting connections nonstop!" << std::endl;
+
+      while (true) {
+          int client_fd = accept(server_fd, nullptr, nullptr);
+
+          if (client_fd == -1) {
+              std::cout << "\nBOOM! The OS refused to give us another file descriptor!" << std::endl;
+              perror("accept failed");
+              break;
+          }
+
+          std::cout << "Accepted client on fd: " << client_fd << std::endl;
+
+          // WE ARE NOT CLOSING IT! WE ARE LEAKING EVERY SINGLE FD!
+          // close(client_fd);
+      }
+      close(server_fd);
+  }
+
+  void consumer() {
+      std::cout << "Consumer launching a massive connection flood..." << std::endl;
+
+      for (int i = 0; i < 5000; i++) {
+          int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+          if (client_fd == -1) {
+              std::cout << "\nBOOM! Consumer ran out of file descriptors!" << std::endl;
+              perror("socket failed");
+              break;
+          }
+
+          struct sockaddr_in address;
+          address.sin_family = AF_INET;
+          address.sin_port = htons(8080);
+          inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+
+          if (connect(client_fd, (struct sockaddr *)&address, sizeof(address)) == -1) {
+              perror("connect failed");
+              break;
+          }
+
+          // this consumer is perfectly clean: it closes its own socket every time
+          close(client_fd);
+      }
+  }
+```
+
+  The commit that named the incident, verbatim: commit
+  9e354c2654cdff1edf15f0ef144a59cf5c94f48d, "The CLOSE_WAIT Zombie Apocalypse
+  (EMFILE bug)".
+
   ==============================================================================================
 
   BLOCKING accept() AND THE GHOST IN THE QUEUE
 
   ==============================================================================================
 
-  Blocking accept() without O_NONBLOCK sleeps forever if no client connects. That is
-  fine for simple servers. The sharp edge: if the socket is blocking and you call
-  accept() after a ghost connection (one that completed the handshake then died), the
-  behaviour differs by OS.
+  Blocking accept() without O_NONBLOCK sleeps forever if no client connects. Not
+  "waits a while" -- forever. The only two ways that call ever returns are a client
+  actually connecting, or the operator killing the process by hand. The two behaviours
+  side by side:
+
+```text
+  blocking:                  accept() ---> [no client] ---> thread suspended forever
+  non-blocking (O_NONBLOCK): accept() ---> [no client] ---> returns -1 (EWOULDBLOCK) instantly
+```
+
+  accept() asks the kernel for the next completed connection off the listen queue. On
+  a blocking socket, if that queue is empty, the kernel simply does not return control
+  to the thread -- it parks it, off the CPU entirely, until a connection actually
+  completes. That is correct behaviour for a single-purpose worker thread whose only
+  job is accepting, but it means that same thread cannot do anything else -- check a
+  shutdown flag, service another socket, run a timer -- while it waits. O_NONBLOCK
+  changes what accept() promises: instead of parking the thread, it returns
+  immediately every time, either with a real connection or with -1 and EWOULDBLOCK
+  meaning nothing arrived yet. The thread stays in control and can decide what
+  "nothing to do right now" should mean -- sleep briefly, poll another socket, check a
+  flag -- instead of the kernel deciding for it.
+
+  That is fine for simple servers. The sharp edge: if the socket is blocking and you
+  call accept() after a ghost connection (one that completed the handshake then died),
+  the behaviour differs by OS.
 
   On Linux (strict POSIX): accept() returns -1 with ECONNABORTED. You must check:
 
@@ -411,6 +850,133 @@ if (client_fd == -1) {
 
   On Cygwin/Windows: accept() may return a seemingly valid fd for a dead connection.
   write() on that fd returns -1 immediately. Always check write()'s return value.
+
+  Where the ghost actually dies, drawn out:
+
+```text
+  client connects ---> TCP handshake (OS kernel queue) ---> client Ctrl+C / RST
+                                                                  |
+  server accept() <--------------------------------------- ECONNABORTED / returns -1
+         |
+    write(-1) ---> server dies or fails silently
+```
+
+  A ghost connection is a race, not a logic error. Nothing in the server's own code
+  is wrong when this happens: the client and the kernel finished a real handshake,
+  and the client tore it down again, all before the server's thread got scheduled to
+  run accept(). The fix is not preventing the race -- it cannot be prevented -- it
+  is treating -1 from accept() as a routine, expected outcome instead of an
+  impossible one. The two-terminal demo that stages the race on purpose, one
+  command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo ghost_connection_demo.cpp
+  ./demo support     -- terminal 1, sleeps 10s, then calls accept()
+  ./demo consumer    -- terminal 2, connects then immediately RSTs
+
+  void support() {
+      int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+      int opt = 1;
+      setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = INADDR_ANY;
+      address.sin_port = htons(8080);
+
+      bind(server_fd, (struct sockaddr*)&address, sizeof(address));
+      listen(server_fd, 10);
+
+      std::cout << "Support (BLOCKING) started." << std::endl;
+      std::cout << "Sleeping for 10s... While I sleep, the consumer will connect and send a brutal RST." << std::endl;
+
+      sleep(10);
+
+      std::cout << "\nAwake! Calling blocking accept()..." << std::endl;
+      int client_fd = accept(server_fd, nullptr, nullptr);
+
+      std::cout << "accept() returned FD: " << client_fd << std::endl;
+
+      if (client_fd != -1) {
+          int bytes = write(client_fd, "hello consumer", 14);
+          std::cout << "write() returned: " << bytes << std::endl;
+          close(client_fd);
+      } else {
+          perror("accept failed");
+      }
+
+      close(server_fd);
+      std::cout << "Support exiting." << std::endl;
+  }
+
+  void consumer() {
+      int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in address;
+      address.sin_family = AF_INET;
+      address.sin_port = htons(8080);
+      inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+
+      std::cout << "Consumer connecting..." << std::endl;
+      if (connect(client_fd, (struct sockaddr *)&address, sizeof(address)) == -1) {
+          perror("connect failed");
+          return;
+      }
+      std::cout << "Consumer connected! In queue." << std::endl;
+
+      // TRICK: force an RST instead of a clean FIN when we close
+      struct linger sl;
+      sl.l_onoff = 1;
+      sl.l_linger = 0;
+      setsockopt(client_fd, SOL_SOCKET, SO_LINGER, (const char*)&sl, sizeof(sl));
+
+      std::cout << "Consumer sending brutal RST (Ctrl+C simulation) and dying..." << std::endl;
+      close(client_fd);
+  }
+```
+
+  And the quietest version of the same failure: a server can die with no error
+  message at all -- no stack trace, no perror output, just silence and a dead
+  process -- from one skipped check on a return value three lines earlier:
+
+```text
+  accept() fails ---> returns -1 (client_fd)
+  code writes: write(-1, buffer, len) ---> OS returns EBADF (-1 is invalid)
+  unchecked, this can trigger SIGPIPE and kill the server with no error printed
+```
+
+  The trace of why this specific crash prints nothing: the first write on a dead
+  descriptor often does not crash at all -- it can simply buffer into a kernel
+  structure that no longer has a live peer on the other end, and return as if
+  nothing were wrong. It is the second write, once the OS has had time to notice
+  the peer is actually gone, that raises SIGPIPE and terminates the process
+  outright, with no exception, no perror line, nothing written to any log. That
+  is what makes an unchecked accept() return dangerous in a way a normal crash is
+  not: a normal crash leaves evidence. This one can look like the server simply
+  stopped. The staged version, one command, no Makefile:
+
+```text
+  g++ -std=c++17 -o demo silent_sigpipe_demo.cpp
+  ./demo support     -- terminal 1, sleeps 10s, accepts, writes twice
+  ./demo consumer    -- terminal 2, connects, then gets Ctrl+C'd
+
+  the support() core, after accept():
+
+      std::cout << "Attempting 1st write... (This just buffers into RAM silently)" << std::endl;
+      write(client_fd, "hello", 5);
+
+      std::cout << "Waiting 1 sec for OS to realize consumer sent an RST..." << std::endl;
+      sleep(1);
+
+      std::cout << "Attempting 2nd write... THIS WILL TRIGGER SIGPIPE AND KILL THE SERVER!" << std::endl;
+      write(client_fd, "world", 5);
+
+      std::cout << "YOU WILL NEVER SEE THIS TEXT BECAUSE THE SERVER IS DEAD." << std::endl;
+```
+
+  Checking client_fd == -1 immediately after accept() and handling that branch --
+  log it, skip it, continue the loop -- closes the entire failure mode. There is
+  no deeper fix needed underneath it; the failure only exists because the check
+  was skipped.
 
   ==============================================================================================
 
@@ -493,6 +1059,17 @@ int main() {
      non-paged pool            -> kernel memory that cannot be swapped out
      RFC 2140                  -> TCP Control Block Interdependence: cached cwnd/ssthresh
                                   shared across connections to the same route/interface
+     ghost connection          -> a connection dead in the queue before accept() collects it
+     SIGPIPE                   -> the signal from a second write() on a dead descriptor;
+                                  kills the process by default, printing nothing
+     CLOSE_WAIT                -> socket held open after the peer's clean close; each one
+                                  pins a file descriptor until the process calls close()
+     SO_REUSEADDR              -> lets bind() succeed on a port with TIME_WAIT sockets
+     SO_LINGER (l_linger=0)    -> abortive close: RST instead of FIN, TIME_WAIT bypassed
+     EWOULDBLOCK               -> errno from a non-blocking accept()/read() when nothing
+                                  is ready yet
+     partial read / write      -> the call returning fewer bytes than asked; the loop
+                                  until the total matches is the only reliable form
 
   =========================================================================
 

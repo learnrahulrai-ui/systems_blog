@@ -15,7 +15,8 @@
   years had: more than one person typing at the same time.
 
   Part of the year-by-year series: [2002](2002-stale-index-three-doors.txt) came before this;
-  the whole arc is in [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+  [2005](2005-head-of-line-three-doors.txt) comes next; the whole arc is in
+  [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
 
   --------
   BEFORE ANY DOOR: ONE DISTINCTION, NOTHING ELSE ASSUMED
