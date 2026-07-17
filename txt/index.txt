@@ -14,6 +14,7 @@
   are copied from the terminal, not guessed.
 
   >> START HERE:
+     [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
      [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
      [Support and Consumer: How a Shared File Forced Us Into TCP](posts/support-consumer-shared-file-forced-tcp.txt)
      [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)

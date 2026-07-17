@@ -11,6 +11,17 @@
   SPECIALS
   --------
 
+  [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
+    2026-07-17 . special . databases, ram, disk, select, c10k, bsod, minicom
+    Ten years of a one-user chat CLI, built one year at a time, run into the same
+    tension that drove fifty years of real database research: RAM is fast and
+    volatile, disk is slow and durable. The Y2K modulo bug that loses a whole
+    digit, the parser that was only accidentally correct, the stale index, a
+    data breach from two users typing at the same millisecond, the real Windows
+    blue screen from a 64-socket select() overflow (0x000000EF), and the
+    self-describing-message-plus-HashMap fix that quietly reinvents the LSM
+    tree -- with the digit-collision math checked in C++.
+
   [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
     2026-07-16 . special . tcp, kernel, sockets, journey, minicom
     The whole support/consumer story reconstructed from the git log: v1's strcmp

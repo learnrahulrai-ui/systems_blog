@@ -1,0 +1,251 @@
+@title The Decade in a Flat File: RAM, Disk, and a BSOD :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- THE DECADE IN A FLAT FILE
+  The Decade in a Flat File: RAM, Disk, and a BSOD
+  ============================================================================================
+
+
+  A one-user chat CLI, built one year at a time from 1995, never sets out to explain why
+  databases exist. It just needs somewhere to put a message. Ten years later, that same
+  question -- where does the message go -- has produced a data breach, an out-of-memory
+  kernel panic waiting to happen, and one real Windows blue screen with a stop code
+  (0x000000EF, CRITICAL_PROCESS_DIED) sitting in the crash log. Every one of those failures
+  traces back to a single physical fact that was true on day one and never stopped being true.
+
+  --------
+  FIRST, THE ONE FACT EVERYTHING ELSE FOLLOWS FROM
+  A read from RAM takes about 60 nanoseconds. A read from a spinning disk takes about 10
+  milliseconds -- roughly 166,000 times slower. An SSD closes most of that gap but is still
+  around 1000 times slower than RAM on random reads.
+
+      RAM:   ~60 ns   (gone the instant power is lost)
+      disk:  ~10 ms    (166,000x slower, still there tomorrow)
+
+  RAM is quick and volatile. Disk is slow and durable. Every design decision in this post, and
+  most of the history of database engineering, is an argument about how to get both at once.
+
+  --------
+  1995-1999: THE CLI JUST WRITES A LINE AND MOVES ON
+  The first four years are the boring part on purpose: fopen in append mode, fgets to read it
+  back, a timestamp, a length-prefixed record once plain text stopped being enough. Nothing
+  here needs a database yet -- one user, one laptop, one file. The interesting failures start
+  the moment the file has to hold more than one person's history at once.
+
+  --------
+  2000: A DATABASE NEEDS AN ID, AND THE FIRST ID SCHEME LOSES A DIGIT
+  Give every conversation an ID built from the year. The obvious shortcut is to keep only the
+  last two digits, the way everyone did before Y2K forced the industry to stop. The naive way
+  to extract two digits is calling %10 twice:
+
+      int naive(int year) {
+          int d = year % 10;
+          return d % 10;      // does nothing new -- d is already one digit
+      }
+
+  %10 already produces a single digit. Applying %10 to a single digit returns that same digit.
+  The second call is not a bug that misfires occasionally -- it mathematically cannot recover
+  the tens digit, ever. 1911, 1921, 1991, and 2001 all end in the same last digit and all
+  collapse to the identical naive result. Four different years, one ID. A message meant for a
+  conversation opened in 2001 lands in a "conversation" that is really just every year sharing
+  that final digit, ID-collided into one bucket. If the lookup loop has no break statement, one
+  send fans out to every collided conversation at once -- not a routing bug, a routing
+  impossibility baked into the math.
+
+  The fix is dividing first, so each %10 call reaches a different digit:
+
+      int fixed(int year) {
+          int digit1 = year % 10;
+          int shifted = year / 10;      // shift right before extracting again
+          int digit2 = shifted % 10;
+          return digit1 + 10 * digit2;
+      }
+
+  --------
+  2001: THE PARSER THAT WAS PERFECT, BUT ONLY BY ACCIDENT
+  With correct two-digit IDs in place, 2001 adds real persistence: on shutdown, loop through
+  every conversation in RAM and write it to disk as one contiguous block per conversation.
+  Loading back in is a single stateful assumption: whatever MSG line comes next belongs to
+  whichever CONV line came most recently.
+
+      all_conversations.back().messages.push_back(m);
+
+  back() does not look up a conversation by ID. It returns whatever was pushed last. That
+  works here because the file itself is a perfect snapshot -- the C++ code that wrote it
+  looped through conversations in order, so physical position on disk and logical grouping are
+  identical. The parser is not clever. It is accidentally correct, entirely because nothing has
+  touched the file except one orderly shutdown routine.
+
+  --------
+  2002: RAM RUNS OUT, SO THE SNAPSHOT BECOMES A LIVE LOG, AND THE ACCIDENT ENDS
+  By 2002 the database is 5 GB and a contemporary machine has roughly 512 MB of RAM -- loading
+  everything to edit it in memory the 2001 way is no longer possible. The fix keeps only a
+  tiny index in RAM: conversation ID mapped to the byte offset where that conversation starts
+  on disk. To read a conversation, seek to its offset and read until the next CONV marker.
+
+  New messages can no longer go through the RAM vector -- there is no RAM vector anymore. They
+  get opened in append mode and written straight to the end of the file, because a spinning
+  disk cannot insert into the middle without relocating everything after the insertion point.
+  Appending is the only disk write that skips that relocation entirely.
+
+      byte 0:   CONV 1
+      byte 7:   MSG Alice Hi!
+      byte 21:  MSG Bob Hello!
+      byte 35:  CONV 2
+      byte 42:  MSG Charlie Sup?
+      byte 56:  MSG Alice I am back!   <- appended AFTER a live send, stuck under CONV 2 on disk
+
+  The index for Conversation 1 still says "start at byte 0." Reading from byte 0 hits byte 35,
+  sees CONV 2, and concludes Conversation 1 is over. Byte 56 -- Alice's live reply -- is never
+  reached. The index was correct the instant it was built and wrong the instant the first live
+  message landed after it.
+
+  --------
+  2003: THIRTY PEOPLE TALKING AT ONCE TURNS THE STALE INDEX INTO A DATA BREACH
+  A single slow index bug becomes something worse once multiple live conversations interleave.
+  Alice and Bob are in Conversation 1. Charlie and Dave are in Conversation 2. Both are active
+  at once:
+
+      CONV 1
+      MSG Alice Hi!
+      CONV 2
+      MSG Charlie Hey!
+      MSG Bob Hello!   <- Bob's reply to Alice, appended on disk after Charlie's line
+
+  Feed this file through the 2001 parser -- the one that was accidentally correct -- and it
+  reads CONV 1, reads Alice, hits CONV 2, concludes Conversation 1 is over, and pushes Bob's
+  reply into whatever back() currently points at: Charlie and Dave's conversation. Alice never
+  sees Bob's reply. Charlie sees a message from Bob that was never meant for him. This is not a
+  bug a clever if-statement patches. It is what happens when a parser's only routing signal is
+  physical position, and physical position stopped meaning anything the moment two people typed
+  at the same time.
+
+  --------
+  1999-2003: THE SAME DECADE, TOLD THROUGH ONE SOCKET NUMBER
+  Handling many users without a thread per connection means one event loop watching every
+  socket at once: select(). Its file descriptor set, fd_set, has a fixed internal array --
+  64 entries on Windows, the constant FD_SETSIZE. This code adds sockets to it every loop:
+
+      for (size_t i = 0; i < client_fds.size(); i++) {
+          FD_SET(client_fds[i], &readfds);
+      }
+
+  With more than 64 connected clients, this writes past the end of a 64-element stack array.
+  That overwrites adjacent stack memory -- including, eventually, the return address that tells
+  the CPU where execution resumes after the current function returns. Windows watches the stack
+  for exactly this: Control Flow Guard detects a return address that was not set by a
+  legitimate call and raises KiFastFailDispatch, an exception the kernel does not let any
+  application catch. The result is a stop code, 0x000000EF, CRITICAL_PROCESS_DIED -- the entire
+  machine goes down, not just the server process.
+
+  The guard is one bounds check:
+
+      int fds_added = 1;
+      for (size_t i = 0; i < client_fds.size(); i++) {
+          if (fds_added >= FD_SETSIZE - 1) break;
+          FD_SET(client_fds[i], &readfds);
+          fds_added++;
+      }
+
+  That stops the crash, but not the deeper ceiling: past 63 real clients, one select() call
+  cannot watch them all, full stop. And even under that ceiling, FD_SET and FD_ISSET each run a
+  hidden O(N) scan across the array -- put inside your own per-client loop, that becomes O(N^2).
+  At 10,000 clients that is roughly 100 million manual comparisons every single cycle, just to
+  find out who has data. select() does not die to a clever bug at C10K. It dies to arithmetic.
+  This is exactly why modern event loops (epoll, kqueue, IOCP) replaced the array with a
+  kernel-level O(1) event queue instead of trying to patch the array further.
+
+  --------
+  SO THE FIX FOR FRAGMENTATION IS MAKING EVERY MESSAGE ANSWER ITS OWN QUESTION
+  Every failure from 2002 onward traces to one design choice: a message's conversation was
+  implied by whatever line happened to sit above it on disk. The fix removes the implication
+  and makes each message self-describing, carrying its own ID:
+
+      MSG 1 Alice I am back!
+
+  It no longer matters whether this line sits at byte 56 or byte 56 million, or what CONV line
+  happens to sit nearest it on disk. The message states where it belongs.
+
+  The second half of the fix replaces the vector with std::map -- a HashMap in C++98 terms.
+  A vector finds things by position; a map finds things by key, in roughly constant time,
+  regardless of insertion order:
+
+      all_conversations[1].messages.push_back(m);
+
+  No back(). No assumption about what got inserted most recently. The ID is the key; the key
+  finds the bucket; fragmentation on disk stops being able to scramble anything, because
+  nothing about routing depends on physical order anymore.
+
+  --------
+  SO A FILE THAT SURVIVES ITS OWN SUCCESS NEEDS ONE MORE IDEA
+  Fixing fragmentation does not fix the RAM ceiling that forced the disk-backed index in the
+  first place -- an append-only log that runs for a year can still reach gigabytes, and
+  reconstructing state at boot by loading the whole thing into a HashMap hits the exact same
+  wall 2002 hit. The trade completes a full circle: solve fragmentation with an in-memory
+  index, and you have rebuilt the RAM-ceiling problem you solved fragmentation to get away
+  from. The industry's actual answer is a periodic compaction pass that rewrites the fragmented
+  append-only log into a clean, sorted file while the server keeps running -- which is what an
+  LSM tree is. In 1970 Codd published the relational model. In 1980 Oracle shipped the first
+  commercial one. In 2007 Amazon described Dynamo. In 2011 Facebook built RocksDB on exactly
+  this log-structured, append-then-compact strategy. A one-user CLI built one year at a time
+  walked into the same tension that drove fifty years of that research, one bug at a time.
+
+  --------
+  SEAM. The reasoning ends here; below, the digit-collision claim checked in C++.
+
+  The claim is that calling %10 twice can never recover a year's tens digit, while dividing
+  first and then taking %10 always does. Here is that claim as a program you can compile and
+  run -- hardcoded years, no loops hiding the arithmetic, nothing left to interpretation.
+
+```cpp
+#include <cstdio>
+
+int naive_double_mod(int year) {
+    int d = year % 10;
+    return d % 10;
+}
+
+int fixed_two_digit(int year) {
+    int digit1 = year % 10;
+    int shifted = year / 10;
+    int digit2 = shifted % 10;
+    return digit1 + 10 * digit2;
+}
+
+int main() {
+    int years[5] = {1911, 1921, 1991, 2001, 1999};
+    for (int i = 0; i < 5; i++) {
+        printf("%d: naive=%d fixed=%d\n",
+               years[i], naive_double_mod(years[i]), fixed_two_digit(years[i]));
+    }
+    return 0;
+}
+```
+
+  Running this prints:
+
+      1911: naive=1 fixed=11
+      1921: naive=1 fixed=21
+      1991: naive=1 fixed=91
+      2001: naive=1 fixed=1
+      1999: naive=9 fixed=99
+
+  Four different years -- 1911, 1921, 1991, 2001 -- all print naive=1. Not close. Identical.
+  The naive method cannot tell them apart because it never looks at the tens digit at all. The
+  fixed method recovers a distinct value for every one of them.
+
+  >> STANDARD NAMES
+     RAM read latency vs disk read latency -> ~60 ns vs ~10 ms, roughly 166,000x
+     applying %10 to an already-one-digit value -> modulo idempotence (recovers nothing new)
+     back() routing by insertion order, not by ID -> implicit grouping (correct only on a snapshot)
+     an index built once, invalidated by the next live append -> a stale index
+     a message carrying its own conversation ID -> a self-describing record
+     std::map keyed by ID instead of std::vector + back() -> the fragmentation fix
+     fd_set's fixed 64-entry array on Windows -> FD_SETSIZE
+     the kernel's return-address tripwire that catches the overflow -> Control Flow Guard / KiFastFailDispatch
+     FD_SET/FD_ISSET's per-call O(N) scan nested in your own loop -> the O(N^2) trap behind the C10K wall
+     periodic rewrite of a fragmented append-only log into sorted form -> compaction (the LSM tree idea)
