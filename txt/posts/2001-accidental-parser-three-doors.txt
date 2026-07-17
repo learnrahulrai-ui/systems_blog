@@ -1,0 +1,85 @@
+@title 2001: Three Doors Into a Parser That Was Only Accidentally Correct :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2001: THREE DOORS INTO A PARSER THAT WAS ONLY ACCIDENTALLY CORRECT
+  2001: Three Doors Into a Parser That Was Only Accidentally Correct
+  ============================================================================================
+
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> load_from_disk() at boot, save_to_disk() at shutdown
+door 2: HAPPY user    boots, sends messages all day, shuts down cleanly, reboots -- history intact
+door 3: ANGRY user    none, yet -- this year has no live writer at all. That is the whole point.
+```
+  There is no door 3 this year in the usual sense. That absence is exactly what makes next
+  year's bug possible -- a correctness property that was never actually tested against the
+  case that will eventually break it.
+
+  --------
+  THE SAVE, FROM DOOR 1
+```text
+for (size_t i = 0; i < all_conversations.size(); i++) {
+    outfile << "CONV " << all_conversations[i].id << "\n";
+    for each message: outfile << "MSG " << ... << "\n";
+}
+```
+  One pass through RAM, in order, writing every conversation as one unbroken block before
+  moving to the next.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2: the file this writes is read back in with one single assumption baked into the
+  loader:
+```text
+all_conversations.back().messages.push_back(m);
+```
+  back() does not search for a conversation by ID. What guarantee does the code actually need
+  to be holding, at the moment this line runs, for "whatever was pushed last" to be the correct
+  answer? Name the guarantee precisely -- not "it usually works," the actual invariant.
+
+  --------
+  THE ANSWER, TRACED
+  The guarantee is that physical position on disk and logical grouping are the same thing --
+  every message immediately following a CONV line, with nothing else interleaved, belongs to
+  that CONV. That guarantee holds here because exactly one writer, in one single pass, produced
+  this file from a fully-formed, already-correct copy of the same data in RAM. The file is not
+  independently correct. It is correct because the thing that wrote it was already correct and
+  wrote in order. back() only works because nothing has ever been appended to this file outside
+  of that one orderly save.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- NOT A BUG IN THIS YEAR'S CODE
+  Nothing in 2001 crashes, misroutes, or loses data. Before looking at any later year: what is
+  the one operational change -- not a code change, an operational one -- that would break the
+  back() guarantee without touching a single line of the parser? Name the change, then name
+  what specifically about it breaks the invariant you just traced.
+
+  --------
+  THE ANSWER, TRACED
+  The moment anything writes to this file outside of one single, complete, in-order save --
+  most obviously, writing messages to disk live as they arrive instead of waiting for shutdown
+  -- physical position on disk stops matching logical grouping. A message appended at 1:00 PM
+  from one conversation and a message appended at 1:00:01 PM from a different one now sit next
+  to each other on disk for a reason that has nothing to do with which conversation they belong
+  to: whoever happened to send at that instant. back() was never wrong. The file it assumed
+  never changes shape stopped existing the moment a second kind of writer showed up.
+
+  --------
+  SO THE 2001 CHECKPOINT
+  The parser was not fragile because it was badly written. It was fragile because it encoded an
+  assumption -- static snapshot, one writer, one pass -- as an unstated fact about the file
+  rather than a checked one. The fix, when it eventually lands, is not a smarter parser. It is
+  removing the assumption: making every message state its own conversation ID instead of
+  inheriting one from whatever sits above it on disk. That fix does not belong to this year.
+  This year's job is just naming, precisely, the invariant that is about to break.
+
+  >> STANDARD NAMES
+     grouping messages by insertion order, not by ID -> implicit grouping via back()
+     a file where physical order matches logical order -> a static snapshot
+     the assumption this year's parser depends on but never checks -> one writer, one ordered pass

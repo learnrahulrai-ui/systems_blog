@@ -1,0 +1,132 @@
+@title 2000: Three Doors Into One Broken Digit :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2000: THREE DOORS INTO ONE BROKEN DIGIT
+  2000: Three Doors Into One Broken Digit
+  ============================================================================================
+
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> create_conversation(year, counter) -> id -> send_message(id, ...)
+door 2: HAPPY user    opens a conversation this year, sends a message, it lands in that one
+door 3: ANGRY user    opens a conversation whose generated ID happens to already exist
+```
+  Door 3 here is not an angry user at all -- nobody misbehaves. The database just runs long
+  enough for two different years to generate the same ID.
+
+  --------
+  THE ID GENERATOR, FROM DOOR 1
+```text
+int digit1 = year % 10;
+year = year / 10;
+int digit2 = year % 10;
+int id = (digit1 + 10 * digit2) * 100 + counter;
+```
+  Two digits pulled out of a four-digit year, glued to a counter. The whole database's routing
+  depends on this one function never handing out the same number twice for two different years.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2: one conversation, one year, one send. What does %10 actually extract from an integer,
+  and why does the code call it twice instead of once? What would go wrong if it only called it
+  once?
+
+  --------
+  THE ANSWER, TRACED
+  %10 extracts the ones digit -- whatever is left over after dividing by 10. Calling it once on
+  a four-digit year only ever gets the last digit; a year's identity needs two. So the code
+  divides by 10 first, discarding the digit it already extracted, then calls %10 again -- this
+  time the remainder is the digit that used to be in the tens place. Divide-then-modulo is a
+  shift, not a repeat. The second call is only useful because the year changed under it between
+  the two calls.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- WHAT IF YOU FORGET THE DIVIDE
+  Someone writes the "obvious" two-digit extractor by calling %10 twice in a row on the same
+  value, with no division in between:
+```text
+int naive(int year) {
+    int d = year % 10;
+    return d % 10;
+}
+```
+  Before running anything: what does the second %10 call actually do to a number that is
+  already a single digit? And which years, specifically, does this collapse into the same
+  result?
+
+  --------
+  THE ANSWER, CHECKED IN C++, NOT ASSERTED
+```cpp
+#include <cstdio>
+
+int naive_double_mod(int year) {
+    int d = year % 10;
+    return d % 10;
+}
+
+int fixed_two_digit(int year) {
+    int digit1 = year % 10;
+    int shifted = year / 10;
+    int digit2 = shifted % 10;
+    return digit1 + 10 * digit2;
+}
+
+int main() {
+    int years[5] = {1911, 1921, 1991, 2001, 1999};
+    for (int i = 0; i < 5; i++) {
+        printf("%d: naive=%d fixed=%d\n",
+               years[i], naive_double_mod(years[i]), fixed_two_digit(years[i]));
+    }
+    return 0;
+}
+```
+  Running this prints:
+
+      1911: naive=1 fixed=11
+      1921: naive=1 fixed=21
+      1991: naive=1 fixed=91
+      2001: naive=1 fixed=1
+      1999: naive=9 fixed=99
+
+  %10 on an already-single-digit number returns that same digit -- it has nothing left to
+  discard. The second call in the naive version does not fail occasionally. It mathematically
+  cannot recover a tens digit that was never divided out first. Four different years -- 1911,
+  1921, 1991, 2001 -- all print naive=1. Not close. Identical. Every conversation opened in any
+  of those years, under the naive generator, shares one ID.
+
+  --------
+  ?? ONE MORE UNHAPPY DOOR: WHAT DOES A SHARED ID ACTUALLY DO AT SEND TIME
+  Say the collision has already happened -- two conversations exist with the same ID. A message
+  arrives addressed to that ID. Trace the lookup loop that finds the target conversation: what
+  is the one line whose presence or absence decides whether this becomes "message goes to the
+  wrong place" versus "message goes to every place that shares this ID"?
+```text
+for (size_t i = 0; i < all_conversations.size(); i++) {
+    if (all_conversations[i].id == target_id) {
+        all_conversations[i].messages.push_back(m);
+        // does the loop stop here, or keep scanning?
+    }
+}
+```
+
+  --------
+  THE ANSWER, TRACED
+  Without a break statement, the loop does not stop at the first match -- it keeps scanning the
+  entire vector and pushes the message into every conversation whose ID matches, not just the
+  one the sender meant. A single collision without a break is not a misdelivery to one wrong
+  conversation. It is a broadcast to every conversation the collision touches, silently, with
+  no error and no signal to the sender that anything unusual happened. The break statement is
+  not a style choice here -- it is the only thing standing between "wrong recipient" and "every
+  recipient."
+
+  >> STANDARD NAMES
+     %10 applied twice to an already-one-digit value -> modulo idempotence (recovers nothing new)
+     dividing first so the next %10 reaches a new digit -> the digit-shift fix
+     two different years producing the same generated ID -> an ID collision
+     a lookup loop with no break after the first match -> mass duplicate delivery

@@ -22,6 +22,34 @@
     self-describing-message-plus-HashMap fix that quietly reinvents the LSM
     tree -- with the digit-collision math checked in C++.
 
+  [1999: Three Doors Into select() — and the One That Blue-Screens Windows](posts/1999-select-fdsetsize-three-doors.txt)
+    2026-07-17 . special . select, fd_set, c10k, windows, bsod, minicom
+    Three doors into one event loop -- codebase, happy user, angry user -- and the angry
+    door is just 62 ordinary idle connections. Traces the FD_SETSIZE overflow to a real
+    Windows stop code (0x000000EF), then the O(N^2) trap hiding under the fix.
+
+  [2000: Three Doors Into One Broken Digit](posts/2000-y2k-collision-three-doors.txt)
+    2026-07-17 . special . y2k, modulo, cpp, minicom
+    Why calling %10 twice on a year can never recover its tens digit, checked in a real
+    compiled proof -- then what a missing break statement turns one ID collision into.
+
+  [2001: Three Doors Into a Parser That Was Only Accidentally Correct](posts/2001-accidental-parser-three-doors.txt)
+    2026-07-17 . special . parsing, invariants, minicom
+    A parser with no bugs in it yet, and the exact unstated assumption that is about to
+    break it -- named precisely, before the break happens.
+
+  [2002: Three Doors Into a Read That Misses Its Own Data](posts/2002-stale-index-three-doors.txt)
+    2026-07-17 . special . indexing, byte-offset, stale-index, minicom
+    A byte-offset index that is correct the instant it is built and wrong the instant the
+    first live message lands after it -- traced from the exact tellg() timing to the read
+    that silently stops short.
+
+  [2003: Three Doors Into a Data Breach Nobody Coded On Purpose](posts/2003-fragmentation-breach-three-doors.txt)
+    2026-07-17 . special . fragmentation, data-breach, hashmap, minicom
+    Two ordinary conversations happening at once turns a working parser into a private
+    message landing in the wrong person's inbox -- traced line by line, then the
+    self-describing-message fix that makes physical file order stop mattering at all.
+
   [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
     2026-07-16 . special . tcp, kernel, sockets, journey, minicom
     The whole support/consumer story reconstructed from the git log: v1's strcmp

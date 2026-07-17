@@ -1,0 +1,115 @@
+@title 1999: Three Doors Into select() — and the One That Blue-Screens Windows :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 1999: THREE DOORS INTO SELECT() — AND THE ONE THAT BLUE-SCREENS WINDOWS
+  1999: Three Doors Into select() — and the One That Blue-Screens Windows
+  ============================================================================================
+
+
+  Walk into this year's code from three different doors before touching a single line. Not
+  because it is thorough for its own sake -- because the bug that blue-screens the machine only
+  shows up through one of the three, and if you only ever walk in the front door you will never
+  see it coming.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> run_c10k_server() -> one select() loop, one fd_set array
+door 2: HAPPY user    connects, sends a line, gets a clean reply, disconnects -- one socket
+door 3: ANGRY user    62 friends connect at once, all idle, all just holding the line open
+```
+  Door 1 tells you what the machine runs. Door 2 tells you what it looks like when nothing is
+  wrong. Door 3 is the one that matters here -- not a malformed packet, not a dropped
+  connection, just an ordinary number of ordinary users.
+
+  --------
+  THE SHAPE OF THE LOOP, FROM DOOR 1
+  Every pass rebuilds one C struct, fd_set, and hands it to the kernel:
+```text
+for (size_t i = 0; i < client_fds.size(); i++) {
+    FD_SET(client_fds[i], &readfds);
+}
+select(0, &readfds, 0, 0, 0);
+```
+  fd_set is a fixed-size array. On Windows it holds exactly 64 entries -- the constant
+  FD_SETSIZE. Nothing in the loop above checks that number against client_fds.size().
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2, one user, no load: what does this loop actually have to guarantee for one connected
+  socket to work correctly, start to finish -- accept it, watch it for data, hand data back?
+  Walk it from FD_ZERO through the return of select() without skipping a step. What state does
+  the loop need to remember between one pass and the next, and where does that state live?
+
+  --------
+  THE ANSWER, TRACED
+  client_fds is the only state that survives between passes -- a plain vector of sockets the
+  loop has accepted so far. Each pass: zero the set, add the listening socket, add every
+  client, block in select() until the kernel says something is ready, then walk client_fds a
+  second time checking which ones the kernel flagged. One socket, one client_fds entry, one
+  FD_SET call. Nothing here is wrong for door 2. The whole mechanism only has one moving part:
+  client_fds.size() staying inside whatever fd_set can actually hold.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- NOT A MALFORMED PACKET, JUST MORE OF THE SAME
+  Door 3: 62 ordinary, well-behaved users, no malformed input anywhere. What is the exact
+  mechanism by which this turns into the entire operating system going down, not just this one
+  process? Trace it from the array write to the thing on the screen.
+
+  --------
+  THE ANSWER, TRACED WITH THE REAL STOP CODE
+  FD_SET writing past the 64th slot does not throw, does not return an error -- it keeps
+  writing into whatever memory sits immediately after the array. That memory is the stack, and
+  the stack holds the return address that tells the CPU where to resume once this function
+  ends. Windows watches for exactly this: Control Flow Guard notices a return address that was
+  not set by a legitimate call and raises KiFastFailDispatch, an exception no application-level
+  catch block is allowed to intercept. It goes straight to the kernel. The kernel does not
+  restart the process -- it halts the machine, with stop code 0x000000EF,
+  CRITICAL_PROCESS_DIED.
+
+  Nobody sent a bad packet. 62 clients holding an open, idle connection is not an attack. The
+  crash is a straight consequence of writing to array index 64 on an array sized for 64.
+
+  --------
+  SO THE GUARD IS ONE BOUNDS CHECK, NOT A REWRITE
+```text
+int fds_added = 1;   // the listening socket already counts as one
+for (size_t i = 0; i < client_fds.size(); i++) {
+    if (fds_added >= FD_SETSIZE - 1) break;
+    FD_SET(client_fds[i], &readfds);
+    fds_added++;
+}
+```
+  This stops the crash. It does not raise the ceiling -- it just refuses to write past it.
+
+  --------
+  ?? ONE MORE UNHAPPY DOOR: DOES THE GUARD ACTUALLY FIX ANYTHING, OR JUST HIDE IT
+  With the guard in place, walk through what happens to client number 64 onward. Are they
+  served eventually, served late, or silently never served at all? And separately: for the 63
+  clients the guard does let through, what does the CPU actually have to do every single pass
+  of the loop to find out which of them have data -- and does that cost change if you go from
+  63 clients to 10,000?
+
+  --------
+  THE ANSWER, TRACED
+  Client 64 is never added to readfds at all -- past the guard, select() never watches that
+  socket, so it is never told data arrived. It is not slow. It is invisible, permanently,
+  until an earlier client disconnects and frees a slot the guard will use. That is the real
+  ceiling: not a crash anymore, but a hard cap on how many users this loop can watch at once.
+
+  The second cost is separate and worse at scale. FD_SET and FD_ISSET are not O(1) -- each one
+  internally scans the array to check for duplicates or membership. Put either one inside your
+  own per-client for loop, which this code does twice, and the two nested O(N) scans become
+  O(N^2). At 10,000 clients that is roughly 100 million comparisons every single pass, just to
+  learn who has data. select() does not fail at scale because of a subtle concurrency bug. It
+  fails because of multiplication.
+
+  >> STANDARD NAMES
+     the fixed 64-entry array select() watches -> fd_set, capped by FD_SETSIZE on Windows
+     the kernel's return-address tripwire       -> Control Flow Guard / KiFastFailDispatch
+     the halt this specific overflow causes      -> stop code 0x000000EF, CRITICAL_PROCESS_DIED
+     FD_SET/FD_ISSET nested inside your own loop -> the O(N^2) trap behind the C10K wall

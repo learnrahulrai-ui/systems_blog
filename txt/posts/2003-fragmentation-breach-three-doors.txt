@@ -1,0 +1,111 @@
+@title 2003: Three Doors Into a Data Breach Nobody Coded On Purpose :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2003: THREE DOORS INTO A DATA BREACH NOBODY CODED ON PURPOSE
+  2003: Three Doors Into a Data Breach Nobody Coded On Purpose
+  ============================================================================================
+
+
+  2001's parser assumed one writer, one ordered pass. 2002 showed what a single live append
+  does to an index built on that assumption. This year adds the one ingredient neither of those
+  years had: more than one person typing at the same time.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> the 2001-style parser, unchanged, reading a file two people wrote to
+door 2: HAPPY user    Alice and Bob talk; nobody else is on the server at the same moment
+door 3: ANGRY user    Alice and Bob talk WHILE Charlie and Dave talk, in a different conversation
+```
+  Door 3 is, once again, not an attacker. It is two ordinary conversations happening at once,
+  which for a one-user 1995 CLI was never even a possible state to be in.
+
+  --------
+  THE FILE, AS TWO CONVERSATIONS INTERLEAVE ON DISK
+```text
+CONV 1
+MSG Alice Hi!
+CONV 2
+MSG Charlie Hey!
+MSG Bob Hello!   <- Bob's reply to Alice, appended on disk after Charlie's line
+```
+  Nothing corrupted this file. Every line is well-formed. Bob's message simply landed after
+  Charlie's, because appending to the end is the only disk write that skips relocating existing
+  bytes, and Bob's packet happened to arrive after Charlie's.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2, before touching the interleaved case: for a single active conversation with no
+  overlap, why does the 2001-style parser -- CONV line, then back().push_back() for every MSG
+  that follows -- still produce the right grouping here? What has to stay true about the file
+  for that to hold, one more time, precisely?
+
+  --------
+  THE ANSWER, TRACED
+  With only one conversation live at a time, every message appended between one CONV marker and
+  the next genuinely does belong to that conversation -- there is no second conversation's
+  traffic to interleave with. The parser's assumption (whatever comes after a CONV line belongs
+  to that CONV) happens to be true, not because the parser checks for it, but because nothing
+  has yet forced two writers to interleave inside the same block.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- TRACE WHERE BOB'S MESSAGE ACTUALLY GOES
+  Door 3, the file shown above, fed through the unchanged 2001 parser. Trace it CONV line by
+  CONV line, MSG line by MSG line. At the exact moment the parser reads "MSG Bob Hello!", which
+  conversation does back() currently point at, and why? Say the conversation ID it lands in
+  before checking the answer below.
+
+  --------
+  THE ANSWER, TRACED
+  1. Parser reads CONV 1. Creates Conversation 1. back() now points at Conversation 1.
+  2. Parser reads MSG Alice Hi! Pushes into Conversation 1 via back(). Correct.
+  3. Parser reads CONV 2. Creates Conversation 2. back() now points at Conversation 2.
+  4. Parser reads MSG Charlie Hey! Pushes into Conversation 2 via back(). Correct.
+  5. Parser reads MSG Bob Hello! back() still points at Conversation 2 -- nothing has changed
+     it since step 3. Bob's reply to Alice is pushed into Charlie and Dave's conversation.
+
+  Alice never sees Bob's reply -- it is not in her conversation's message list at all. Charlie
+  sees a message from Bob that was never meant for him, sitting inside his own private
+  conversation with Dave. Nobody attacked anything. The parser did exactly what it was written
+  to do. The invariant it depends on -- physical order matches logical grouping -- was true in
+  2001 and false the moment two conversations became live at once.
+
+  --------
+  ?? ONE MORE UNHAPPY DOOR: DOES A SMARTER PARSER FIX THIS, OR ONLY THE SYMPTOM
+  Before reading the fix below: is there ANY way to patch the 2001 parser itself -- smarter
+  lookahead, remembering more state, a cleverer back() -- that makes physical position on disk
+  reliably tell you which conversation a message belongs to? Or is the information the parser
+  needs simply not present anywhere in the file as written?
+
+  --------
+  THE ANSWER, TRACED
+  It is not present. A MSG line as written -- sender and text only -- carries no signal at all
+  about which conversation it belongs to; that fact lived entirely in which CONV line happened
+  to sit above it, and physical position stopped being a reliable signal the moment two writers
+  could interleave. No amount of parser cleverness recovers information the file never recorded
+  in the first place. The fix has to change what gets written, not how it gets read.
+
+  --------
+  SO THE FIX: MAKE THE MESSAGE ANSWER ITS OWN QUESTION
+```text
+MSG 1 Alice I am back!
+```
+  Every message now carries its own conversation ID. It no longer matters whether this line
+  sits at byte 56 or byte 56 million, or what CONV line happens to sit nearest it on disk -- the
+  message states where it belongs, and routing stops depending on physical position at all:
+```text
+all_conversations[msg_id].messages.push_back(m);   // std::map, keyed by ID -- no back()
+```
+  Replacing the vector-plus-back() with a map keyed by ID is what makes that line possible.
+  Fragmentation on disk can now scramble the physical layout in any order it wants; the routing
+  is correct regardless, because it was never reading position in the first place.
+
+  >> STANDARD NAMES
+     two live writers interleaving on one append-only file -> fragmentation
+     a message routed by whichever CONV line sat above it -> a data breach by physical proximity
+     a message carrying its own conversation ID -> a self-describing record
+     std::map keyed by ID instead of vector + back() -> the routing fix that survives fragmentation

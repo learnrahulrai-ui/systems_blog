@@ -1,0 +1,96 @@
+@title 2002: Three Doors Into a Read That Misses Its Own Data :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- 2002: THREE DOORS INTO A READ THAT MISSES ITS OWN DATA
+  2002: Three Doors Into a Read That Misses Its Own Data
+  ============================================================================================
+
+
+  Last year's checkpoint named the assumption that was about to break: one writer, one ordered
+  pass. This year is the operational change that breaks it, arriving for a reason that has
+  nothing to do with correctness -- the database got too big to fit in memory.
+
+  --------
+  FIRST, THE THREE DOORS
+```text
+door 1: CODEBASE     main() -> build_index() at boot -> print_conversation_fast(id) on read
+door 2: HAPPY user    boots, reads an old conversation that has not changed since boot -- instant
+door 3: ANGRY user    reads a conversation that just received a live message after boot
+```
+  Door 3 is, again, not misbehavior. It is the single most ordinary thing a user can do: keep
+  talking after the server has been running for a while.
+
+  --------
+  WHY THIS YEAR EXISTS AT ALL, FROM DOOR 1
+  By 2002 the database is around 5 GB; a contemporary machine has roughly 512 MB of RAM.
+  Loading everything into a vector the 2001 way no longer fits. The fix keeps
+  only a small index in RAM -- conversation ID mapped to the byte offset where that conversation
+  starts on disk -- and seeks directly to that offset on read instead of scanning the whole
+  file.
+
+  --------
+  ? THE HAPPY PATH, FROM SCRATCH
+  Door 2: build_index() walks the file once at boot and records, for every CONV line, the exact
+  byte offset where it starts. What single ordering mistake in that walk -- capturing the offset
+  at the wrong moment relative to reading the line -- would make every recorded offset point
+  into the middle of the wrong line instead of the start of the right one? Name the exact
+  moment tellg() has to be called, and why one line off in either direction breaks it.
+
+  --------
+  THE ANSWER, TRACED
+```text
+long current_offset = intercom.tellg();   // must happen BEFORE getline consumes the line
+if (!std::getline(intercom, line)) break;
+if (line.find("CONV") == 0) { record current_offset for this conv_id; }
+```
+  tellg() has to run before getline() advances the stream past the line being recorded.
+  Capture it after getline() instead, and the offset you record is the position AFTER the CONV
+  line -- the start of whatever comes next, not the start of the conversation itself. Every
+  seek built from that offset lands one line late for the rest of that entry's life.
+
+  --------
+  ?? THE UNHAPPY PATH, FROM SCRATCH -- THE INDEX ITSELF, NOT A TYPO IN BUILDING IT
+  Assume build_index() is written correctly, offsets captured at the right moment, index
+  entirely accurate at the exact instant boot finished. Door 3: a live message arrives for a
+  conversation that was already indexed at boot, and gets appended to the very end of the file,
+  the only disk write that skips relocating existing bytes. Walk print_conversation_fast() for that
+  same conversation right after: it seeks to the recorded offset and reads forward until it
+  hits the next CONV marker. Does it reach the new message? Trace exactly where the read stops
+  and why.
+```text
+byte 0:   CONV 1              <- index says Conversation 1 starts here
+byte 7:   MSG Alice Hi!
+byte 21:  MSG Bob Hello!
+byte 35:  CONV 2              <- reader stops here, sees a new CONV marker
+byte 42:  MSG Charlie Sup?
+byte 56:  MSG Alice I am back!   <- appended live, AFTER boot, sitting past CONV 2 on disk
+```
+
+  --------
+  THE ANSWER, TRACED
+  The read starts at byte 0, correctly, reads Alice and Bob's messages, then hits byte 35 --
+  CONV 2 -- and stops, because the reader's own stopping rule is "read until the next CONV
+  marker." Byte 56, Alice's live reply, is never reached. Not because the offset is wrong. The
+  offset at byte 0 is completely correct for the file as it existed at boot. The problem is that
+  the file described by the index and the file sitting on disk right now are two different
+  files, and the index has no way to know that. It was correct the instant it was built and
+  wrong the instant the first live append landed anywhere before the conversation's own next-
+  CONV boundary.
+
+  --------
+  SO THE INVARIANT THIS YEAR ACTUALLY BREAKS
+  The index assumes the file is static once built. Live appends are the entire point of running
+  a server for more than a few minutes. An index that goes stale on the very first write is not
+  a bug in the index code -- it is a structurally incorrect design for a file that keeps
+  changing underneath it. Fixing it for real needs one of two things: rebuild the index on every
+  append (defeats the purpose of having an index at all), or stop routing by physical position
+  entirely, which is exactly what forces the next year's redesign.
+
+  >> STANDARD NAMES
+     capturing a byte offset after the line, not before -> the tellg()-timing bug (offset desync)
+     mapping conversation ID to a byte offset -> the byte-offset index
+     an index correct at build time, wrong after the first live write -> a stale index
