@@ -10,6 +10,18 @@
   ============================================================================================
 
 
+  Part of the year-by-year series: [1999](1999-select-fdsetsize-three-doors.txt) came before
+  this; [2001](2001-accidental-parser-three-doors.txt) comes next; the whole arc is in
+  [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: TWO OPERATIONS, NOTHING ELSE ASSUMED
+  This post needs exactly two arithmetic facts, both checkable on paper. Integer division in
+  C++ throws away the remainder: 1999 / 10 is 199, not 199.9 -- the .9 is simply gone. The
+  modulo operator gives back only that thrown-away remainder: 1999 % 10 is 9. Together they
+  take a number apart digit by digit: / 10 shifts everything one place to the right, % 10
+  reads the digit that would have fallen off. That is the entire toolbox for this year.
+
   --------
   FIRST, THE THREE DOORS
 ```text
@@ -101,6 +113,17 @@ int main() {
   of those years, under the naive generator, shares one ID.
 
   --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  If the collision came from something else -- an uninitialized variable, a parsing bug, bad
+  luck in the counter -- the collisions would be irregular: some years colliding on one run and
+  not the next, or colliding on years that do NOT share a last digit. The prediction from the
+  modulo explanation is exact and testable: every year ending in the same digit collides, every
+  year ending in a different digit does not, deterministically, every run. The program above is
+  that test. 1999 ends in 9 and prints naive=9, not 1 -- the one year in the list with a
+  different last digit is the one year that escapes, which is precisely what the explanation
+  demands and what an "it's just flaky" theory cannot produce.
+
+  --------
   ?? ONE MORE UNHAPPY DOOR: WHAT DOES A SHARED ID ACTUALLY DO AT SEND TIME
   Say the collision has already happened -- two conversations exist with the same ID. A message
   arrives addressed to that ID. Trace the lookup loop that finds the target conversation: what
@@ -124,6 +147,16 @@ for (size_t i = 0; i < all_conversations.size(); i++) {
   no error and no signal to the sender that anything unusual happened. The break statement is
   not a style choice here -- it is the only thing standing between "wrong recipient" and "every
   recipient."
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  The industry-wide Y2K remediation reportedly cost on the order of 300 billion dollars, and
+  the two-digit habit it fixed is this exact bug at planetary scale. What I have not traced:
+  how much of that spend went to systems where the collision was, like here, one arithmetic
+  fix -- versus systems where the two-digit year had leaked into file formats and interchange
+  protocols, where (as the 2001 and 2002 posts in this series show) the stored data itself
+  becomes the hard part. My suspicion is that the storage side dominated, but I have not
+  verified it against the actual remediation literature.
 
   >> STANDARD NAMES
      %10 applied twice to an already-one-digit value -> modulo idempotence (recovers nothing new)

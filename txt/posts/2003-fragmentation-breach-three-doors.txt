@@ -14,6 +14,18 @@
   does to an index built on that assumption. This year adds the one ingredient neither of those
   years had: more than one person typing at the same time.
 
+  Part of the year-by-year series: [2002](2002-stale-index-three-doors.txt) came before this;
+  the whole arc is in [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: ONE DISTINCTION, NOTHING ELSE ASSUMED
+  Hold two orderings apart in your head, because this entire post is about the moment they
+  stop agreeing. LOGICAL order: which conversation a message belongs to -- Bob's reply belongs
+  with Alice's question, wherever either one is stored. PHYSICAL order: where the bytes landed
+  on disk -- decided by whose network packet arrived first, nothing more. A file has only
+  physical order. Any grouping you want back out of it must either be reconstructable from the
+  bytes themselves, or it is gone.
+
   --------
   FIRST, THE THREE DOORS
 ```text
@@ -103,6 +115,91 @@ all_conversations[msg_id].messages.push_back(m);   // std::map, keyed by ID -- n
   Replacing the vector-plus-back() with a map keyed by ID is what makes that line possible.
   Fragmentation on disk can now scramble the physical layout in any order it wants; the routing
   is correct regardless, because it was never reading position in the first place.
+
+  --------
+  SEAM. The reasoning ends here; below, the fix checked in C++.
+
+  The [2001 post](2001-accidental-parser-three-doors.txt) proved the failure with a runnable
+  program: the back() parser, fed this same interleaved shape, put Bob's message inside
+  Charlie's conversation. Here is the other half -- the same interleaved file, messages now
+  carrying their own conversation ID, routed by map instead of by position:
+
+```cpp
+#include <cstdio>
+#include <string>
+#include <map>
+#include <vector>
+#include <sstream>
+
+int main() {
+    const char* interleaved =
+        "CONV 1\n"
+        "MSG 1 Alice hi\n"
+        "CONV 2\n"
+        "MSG 2 Charlie sup\n"
+        "MSG 1 Bob hello\n";
+
+    std::map<int, std::vector<std::string> > database;
+    std::istringstream in(interleaved);
+    std::string type;
+    while (in >> type) {
+        if (type == "CONV") {
+            int id;
+            in >> id;
+            database[id];
+        } else if (type == "MSG") {
+            int id;
+            std::string sender, text;
+            in >> id >> sender;
+            std::getline(in, text);
+            database[id].push_back(sender);
+        }
+    }
+
+    std::map<int, std::vector<std::string> >::iterator it;
+    for (it = database.begin(); it != database.end(); ++it) {
+        printf("CONV %d gets:", it->first);
+        for (size_t j = 0; j < it->second.size(); j++) {
+            printf(" %s", it->second[j].c_str());
+        }
+        printf("\n");
+    }
+    return 0;
+}
+```
+
+  Running this prints:
+
+      CONV 1 gets: Alice Bob
+      CONV 2 gets: Charlie
+
+  Bob's line still sits under CONV 2 in the file -- nothing about the physical layout was
+  cleaned up. He lands with Alice anyway, because the routing read the 1 in his own MSG line
+  and never consulted position at all.
+
+  --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  The sharpest way to test "position stopped mattering" is to make position as wrong as
+  possible and watch the output not change. Shuffle the interleaved file's MSG lines into any
+  order you like -- reverse them, sort them alphabetically, move Bob's line to the top of the
+  file before any CONV marker exists. Rerun. The prediction is that the grouping output is
+  byte-for-byte identical every time, because the only inputs to routing are the IDs inside
+  the lines themselves. If ANY shuffle changes which conversation a message lands in, the fix
+  is not what it claims to be. (One real subtlety this flushes out: the map version does not
+  even need the CONV lines -- database[id] creates the bucket on first use. The old parser
+  died without them; the new one treats them as decoration.)
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  This fix trades the fragmentation problem for a new debt that this series has not paid yet:
+  the map lives in RAM, and rebuilding it at boot means reading the ENTIRE append-only log --
+  which is exactly the too-big-for-RAM wall that forced the 2002 index in the first place. The
+  industry's answer is compaction: periodically rewrite the fragmented log into a sorted,
+  snapshot-shaped file while the server keeps running, which is the core of the LSM tree. What
+  I have not worked out by hand is compaction's own unhappy path -- what happens to a message
+  that arrives WHILE the rewrite is mid-flight, and how the log and the half-written compacted
+  file avoid exactly the kind of disagreement the 2002 index had with its file. That trace is
+  a future year's work.
 
   >> STANDARD NAMES
      two live writers interleaving on one append-only file -> fragmentation

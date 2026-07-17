@@ -10,6 +10,17 @@
   ============================================================================================
 
 
+  Part of the year-by-year series: [2000](2000-y2k-collision-three-doors.txt) came before
+  this; [2002](2002-stale-index-three-doors.txt) comes next; the whole arc is in
+  [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: ONE FUNCTION, NOTHING ELSE ASSUMED
+  This post needs one C++ fact. A vector keeps its elements in the order they were inserted,
+  and back() returns the most recently inserted one -- not the biggest, not the one matching
+  any ID, just whatever arrived last. Everything below is the story of a program betting its
+  correctness on "whatever arrived last" and "the one I actually mean" being the same thing.
+
   --------
   FIRST, THE THREE DOORS
 ```text
@@ -78,6 +89,101 @@ all_conversations.back().messages.push_back(m);
   removing the assumption: making every message state its own conversation ID instead of
   inheriting one from whatever sits above it on disk. That fix does not belong to this year.
   This year's job is just naming, precisely, the invariant that is about to break.
+
+  --------
+  SEAM. The reasoning ends here; below, "accidentally correct" checked in C++.
+
+  The claim is strong: the SAME parser, unmodified, produces correct grouping on a snapshot
+  file and wrong grouping on an interleaved one. If that is true, the bug was never in the
+  parser's code -- it was in the file's shape. One function, two hardcoded files, run both:
+
+```cpp
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <sstream>
+
+struct Conversation {
+    int id;
+    std::vector<std::string> senders;
+};
+
+void parse_with_back(const char* label, const char* file_text) {
+    std::vector<Conversation> all;
+    std::istringstream file_stream(file_text);
+    std::string type;
+    while (file_stream >> type) {
+        if (type == "CONV") {
+            Conversation c;
+            file_stream >> c.id;
+            all.push_back(c);
+        } else if (type == "MSG") {
+            std::string sender, text;
+            file_stream >> sender;
+            std::getline(file_stream, text);
+            all.back().senders.push_back(sender);
+        }
+    }
+    printf("%s:\n", label);
+    for (size_t i = 0; i < all.size(); i++) {
+        printf("  CONV %d gets:", all[i].id);
+        for (size_t j = 0; j < all[i].senders.size(); j++) {
+            printf(" %s", all[i].senders[j].c_str());
+        }
+        printf("\n");
+    }
+}
+
+int main() {
+    const char* snapshot =
+        "CONV 1\n"
+        "MSG Alice hi\n"
+        "MSG Bob hello\n"
+        "CONV 2\n"
+        "MSG Charlie sup\n";
+
+    const char* interleaved =
+        "CONV 1\n"
+        "MSG Alice hi\n"
+        "CONV 2\n"
+        "MSG Charlie sup\n"
+        "MSG Bob hello\n";
+
+    parse_with_back("snapshot", snapshot);
+    parse_with_back("interleaved", interleaved);
+    return 0;
+}
+```
+
+  Running this prints:
+
+      snapshot:
+        CONV 1 gets: Alice Bob
+        CONV 2 gets: Charlie
+      interleaved:
+        CONV 1 gets: Alice
+        CONV 2 gets: Charlie Bob
+
+  Same function, byte for byte. On the snapshot, Bob's message lands with Alice, where it
+  belongs. On the interleaved file -- identical lines, one moved -- Bob lands inside Charlie's
+  conversation. Nothing in the code changed between the two runs. Only the file's shape did.
+
+  --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  If the parser had a genuine code bug -- a parsing error, a bad comparison -- it would
+  misroute on BOTH files, or at least misroute somewhere on the snapshot too. The prediction
+  of the "accidentally correct" explanation is asymmetric and exact: zero errors on any
+  snapshot-shaped file, and on an interleaved file, every misrouted message lands specifically
+  in whichever conversation's CONV line most recently preceded it -- never in a random one.
+  The run above confirms both halves: the snapshot is perfect, and Bob lands exactly where
+  back() pointed, in CONV 2, not in some arbitrary wrong place.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  How much real 1990s software shipped on this exact bet. Format designers clearly knew the
+  danger eventually -- self-describing record formats and length-prefixed framing show up
+  everywhere after this era -- but I have not traced whether that arrived as a principle or
+  got re-learned one fragmented file at a time, the way it happened here.
 
   >> STANDARD NAMES
      grouping messages by insertion order, not by ID -> implicit grouping via back()

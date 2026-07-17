@@ -17,6 +17,15 @@
   (0x000000EF, CRITICAL_PROCESS_DIED) sitting in the crash log. Every one of those failures
   traces back to a single physical fact that was true on day one and never stopped being true.
 
+  This is the whole arc in one post. Each of the five load-bearing years also has its own
+  deep-dive, with the happy and unhappy path traced as questions you answer before reading on,
+  and a runnable proof in each:
+  [1999, the select() BSOD](1999-select-fdsetsize-three-doors.txt) ·
+  [2000, the broken digit](2000-y2k-collision-three-doors.txt) ·
+  [2001, the accidentally correct parser](2001-accidental-parser-three-doors.txt) ·
+  [2002, the stale index](2002-stale-index-three-doors.txt) ·
+  [2003, the fragmentation breach](2003-fragmentation-breach-three-doors.txt).
+
   --------
   FIRST, THE ONE FACT EVERYTHING ELSE FOLLOWS FROM
   A read from RAM takes about 60 nanoseconds. A read from a spinning disk takes about 10
@@ -193,6 +202,34 @@
   commercial one. In 2007 Amazon described Dynamo. In 2011 Facebook built RocksDB on exactly
   this log-structured, append-then-compact strategy. A one-user CLI built one year at a time
   walked into the same tension that drove fifty years of that research, one bug at a time.
+
+  --------
+  HOW THIS WHOLE STORY COULD HAVE BEEN WRONG, AND HOW EACH LINK WAS CHECKED
+  A chain of claims this long earns suspicion, so each link has its own falsifiable check, and
+  each one has now actually been run. The digit collision: if it were a fluke rather than
+  arithmetic, some same-last-digit year would escape -- the program below tries five years and
+  none escapes. The accidentally-correct parser: if the parser code itself were buggy, it would
+  misroute on snapshot files too -- run against both shapes (the [2001
+  post](2001-accidental-parser-three-doors.txt) does this), it is perfect on snapshots and
+  wrong only on interleaved input. The stale index: if the append had failed or the index were
+  built wrong, the first pre-append read would already misbehave -- the [2002
+  post](2002-stale-index-three-doors.txt) prints the offsets showing index correct, append
+  landed, read still blind. The BSOD: if it were flaky hardware, the crash would not respect a
+  connection-count threshold or repeat one stop code -- it respected both, every run. None of
+  these are the only conceivable checks, but every one of them could have come out the other
+  way, and none did.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  Three honest edges of this story. First, compaction's own unhappy path: what exactly happens
+  to a message that arrives while the compaction rewrite is mid-flight -- the coordination
+  between the live log and the half-written sorted file is the hard part of an LSM tree, and I
+  have only read that it works, not traced why. Second, the crash-ordering problem hiding
+  inside "index every append as it happens": if the process dies between the append landing and
+  the index entry landing, the two disagree again -- I suspect this is the seed of the
+  write-ahead log, but I have not verified that against a real WAL implementation. Third, why
+  FD_SETSIZE is exactly 64 on Windows and 1024 on Linux -- both numbers are redefinable, and I
+  have not found where either default was originally chosen.
 
   --------
   SEAM. The reasoning ends here; below, the digit-collision claim checked in C++.

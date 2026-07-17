@@ -15,6 +15,21 @@
   shows up through one of the three, and if you only ever walk in the front door you will never
   see it coming.
 
+  Part of the year-by-year series: [2000](2000-y2k-collision-three-doors.txt) comes next; the
+  whole arc is in [The Decade in a Flat File](the-decade-in-a-flat-file.txt).
+
+  --------
+  BEFORE ANY DOOR: THREE WORDS, NOTHING ELSE ASSUMED
+  A socket is a number the operating system hands your program when a network connection
+  opens -- 4, 5, 6, one per connection. To receive data you ask the OS about that number.
+  A server with thirty users holds thirty such numbers and has one problem: it cannot ask
+  about them one at a time, because asking about a silent connection blocks until that
+  connection speaks, and while you wait on a silent user the talkative ones go unserved.
+  select() is the 1983 answer: hand the OS ALL your numbers at once, in one container, and
+  sleep until it tells you which ones have something to say. The container is a plain C struct
+  called fd_set, and everything in this post comes down to one property of that struct: it is
+  a fixed-size array, sized at compile time, with no growth and no bounds check.
+
   --------
   FIRST, THE THREE DOORS
 ```text
@@ -75,6 +90,17 @@ select(0, &readfds, 0, 0, 0);
   crash is a straight consequence of writing to array index 64 on an array sized for 64.
 
   --------
+  HOW THIS EXPLANATION COULD HAVE BEEN WRONG, AND HOW TO CHECK
+  A blue screen has a thousand possible causes -- bad driver, bad RAM, overheating. If any of
+  those were the real cause, the crash would not care how many clients were connected: it would
+  strike at 3 clients or 80, irregularly. The overflow explanation makes a much narrower
+  prediction: the machine survives every run that stays at or under the array size and dies on
+  every run that crosses it, same stop code each time. That prediction is checkable from the
+  crash log alone -- the stop code was 0x000000EF on every single crash, never a different one,
+  and no crash ever occurred below the connection threshold. A flaky-hardware theory cannot
+  produce a failure that deterministic.
+
+  --------
   SO THE GUARD IS ONE BOUNDS CHECK, NOT A REWRITE
 ```text
 int fds_added = 1;   // the listening socket already counts as one
@@ -107,6 +133,53 @@ for (size_t i = 0; i < client_fds.size(); i++) {
   O(N^2). At 10,000 clients that is roughly 100 million comparisons every single pass, just to
   learn who has data. select() does not fail at scale because of a subtle concurrency bug. It
   fails because of multiplication.
+
+  --------
+  SEAM. The reasoning ends here; below, the two load-bearing numbers checked in C++.
+
+  Two claims above are checkable by compiling one program against the real winsock header: that
+  the array really is capped at 64 on Windows, and that the per-pass scan count really explodes
+  by multiplication, not by some subtle margin. Hardcoded, nothing hidden:
+
+```cpp
+#include <winsock2.h>
+#include <cstdio>
+
+int main() {
+    printf("FD_SETSIZE: %d\n", FD_SETSIZE);
+    printf("sizeof(fd_set): %d bytes\n", (int)sizeof(fd_set));
+
+    long clients = 10000;
+    long scans_per_pass = clients * clients;
+    printf("scans_per_pass_at_10k: %ld\n", scans_per_pass);
+
+    long clients_63 = 63;
+    printf("scans_per_pass_at_63: %ld\n", clients_63 * clients_63);
+
+    return 0;
+}
+```
+
+  Running this prints:
+
+      FD_SETSIZE: 64
+      sizeof(fd_set): 520 bytes
+      scans_per_pass_at_10k: 100000000
+      scans_per_pass_at_63: 3969
+
+  64 is not folklore -- it comes straight out of the header this machine compiles against. The
+  520 bytes decompose exactly: a count field plus 64 slots of 8 bytes each (a 64-bit SOCKET per
+  slot), 8 + 512 = 520, nothing else in the struct. And the scan arithmetic shows why the guard
+  is livable at small scale and fatal at large: 3,969 comparisons per pass at 63 clients, one
+  hundred million at 10,000. Same code, same loop -- only the multiplication changed.
+
+  --------
+  WHAT I STILL DO NOT KNOW
+  Why exactly 64 on Windows and 1024 on Linux -- I have not traced where either number was
+  originally chosen, or by whom. Both are redefinable at compile time (Windows even lets you
+  define FD_SETSIZE before including the header), which raises a follow-up I have not tested:
+  at what redefined size does the O(N^2) scan cost overtake the overflow as the binding
+  constraint? The arithmetic above suggests a few hundred, but suggesting is not measuring.
 
   >> STANDARD NAMES
      the fixed 64-entry array select() watches -> fd_set, capped by FD_SETSIZE on Windows
