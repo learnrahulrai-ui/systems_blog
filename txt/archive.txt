@@ -11,6 +11,19 @@
   SPECIALS
   --------
 
+  [Introduction to SIMD](posts/introduction-to-simd.txt)
+    2026-07-23 . special . simd, avx, gather, denormals, memory-bandwidth, reduction, matmul, c
+    A long researcher's notebook that keeps getting excited and keeps getting let down. Four
+    numbers and one add, an array for free, a three-times sum speedup -- then a cold shower: the
+    speedup was crippled -O0, and a compiler auto-vectorizes the plain loop for free. A gather
+    that thrills, then times out as four internal fetches wearing one 256-bit instruction. A
+    subnormal cliff that a Zen2 chip refuses to fall off (but an Intel server would). A memory
+    wall predicted to kill SIMD that instead makes SIMD help more. A reduction folded too eagerly
+    that runs slower than no vector code at all. And, at the very end, over a heap of slower
+    corpses, the outer-product matrix kernel every other blog opens its first paragraph with --
+    reached at 0.25s only after every failure. No summary, no takeaways; the matrix waits at the
+    end, not the start.
+
   [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
     2026-07-23 . special . simd, avx, matmul, memory-layout, gather, reduce, mental-model, c
     A ladder from four bare numbers to one matrix cell: plain numbers, arrays, sum, product,

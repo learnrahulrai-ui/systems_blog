@@ -1,0 +1,388 @@
+@title Introduction to SIMD :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL
+  Introduction to SIMD
+  ============================================================================================
+
+
+  A processor spends most of a working life bored. Fetch a number, add a number, store a
+  number, fetch a next number. Widths of a modern register have grown to hold eight double
+  values at once, yet a plain loop feeds a single value at a time, leaving seven slots dark.
+  SIMD -- single instruction, multiple data -- names a promise to fill those slots: one add
+  instruction operating on eight numbers laid side by side, one multiply on eight, one load
+  pulling eight neighbors in a single reach.
+
+  A promise sounds enormous. Eight-wide arithmetic reads like an eight-times speedup, free for
+  a taking, waiting behind a header file. Blogs open with a matrix multiply, sprinkle a few
+  intrinsics, quote a graph, and close. A reader nods along and files SIMD under "solved."
+
+  A notebook below runs a different route. Every claim gets compiled and timed on one ordinary
+  laptop -- an AMD Ryzen 7 5700U, AVX2, no AVX-512, so registers hold four double values or
+  eight float values, g++ at -O2 unless a build flag appears. No disassembly, no screenshot of
+  a compiler explorer, no assembly recited as proof. Only C a reader can run, and a clock. A
+  route begins where a route should begin, with almost nothing, and walks toward a matrix by a
+  long road paved with results a first draft did not predict. Excitement arrives early. So does
+  disappointment. A matrix waits at an end, not a start, because arriving at a matrix honestly
+  costs a whole notebook of failures first.
+
+  Bring skepticism. A route rewards it.
+
+  --------
+  FOUR NUMBERS, ONE INSTRUCTION -- A FIRST AND CLEANEST WIN
+
+  Forget arrays, matrices, loops. Take four numbers. Take four more. Add them:
+
+      1   2   3   4
+   + 10  20  30  40
+   = 11  22  33  44
+
+  Four additions, and a machine performs all four in a single instruction. Numbers ride four to
+  a register, one add operating across every slot at once. Nothing scatters, nothing waits,
+  nothing folds. A whole idea of SIMD sits inside a picture above, stripped of ceremony: four
+  numbers, one instruction, four answers.
+
+  Running four such adds, then reading a register back, prints 11 22 33 44 exactly. No surprise
+  yet. A cleanest possible case behaves.
+
+  --------
+  AN ARRAY FALLS OUT FOR FREE
+
+  An array of eight is only two grabs of four neighbors. Double every value:
+
+      1 2 3 4 5 6 7 8   ->   2 4 6 8 10 12 14 16
+
+  Grab a first four, double, store. Grab a second four, double, store. Eight values handled by
+  two instructions where a plain loop would spend eight. Contiguous memory rides into a register
+  in one reach, because four values glued together arrive together.
+
+  A confidence builds. SIMD looks like a lever a person simply pulls.
+
+  --------
+  SUMMING AN ARRAY -- A WIN WITH A NUMBER ATTACHED
+
+  Addition and doubling produce fresh outputs. A sum collapses many numbers into one, a harder
+  motion. A naive reflex pours eight numbers into a single running total, one after another,
+  eight sequential adds. SIMD refuses a single total. SIMD keeps four running totals, one per
+  slot:
+
+      grab  1 2 3 4
+      grab  5 6 7 8
+      add slot to slot ->  6  8 10 12     four partial totals growing in parallel
+      fold once        ->  6 + 8 + 10 + 12 = 36
+
+  Four accumulators advance together, and a fold into one number happens a single time, at a
+  very end. A count of operations drops from eight down toward two grabs plus a small fold.
+
+  Timing arrives, and timing intoxicates. A 64-value sum, repeated twenty million times, plain
+  loop against a hand-written four-slot version:
+
+      plain sum  = 3.093 s
+      simd sum   = 1.047 s
+
+  Near three times faster. A lever pulled, a reward paid. A first real number, and a number
+  points a right direction. A researcher writing a first draft would stop here, satisfied,
+  publish a graph, and move on.
+
+  A researcher writing a first draft would be wrong.
+
+  --------
+  A COLD SHOWER -- A COMPILER ALREADY DID EVERY BIT OF IT
+
+  A three-times number carried a hidden flag: a plain loop above compiled with optimization
+  turned OFF. An unoptimized loop drags a pile of bookkeeping -- a loop counter, a bounds check,
+  a reload -- and a hand-written vector version simply skipped a pile. A comparison flattered a
+  vector version by crippling an opponent.
+
+  Turn optimization back on, and a floor drops away. At -O2 a compiler auto-vectorizes a clean
+  loop with no intrinsics written by a human at all. A plain sum, compiled properly, collapses
+  into a four-slot or eight-slot add on a compiler's own initiative. A hand-written version and
+  a plain version converge, because a compiler wrote a vector loop a human thought was a
+  personal achievement.
+
+  A first lesson lands, and a first lesson stings: a comparison at -O0 measures nothing. A gap a
+  first draft celebrated was a gap between vectorized code and deliberately broken code. A real
+  question -- can a hand beat a compiler? -- has not yet been asked, let alone answered.
+
+  A confidence built two sections ago now looks naive. Onward, warier.
+
+  --------
+  REACHING FOR SCATTERED DATA -- A GATHER, AND A THRILL
+
+  Every win so far leaned on neighbors: four values glued in memory, one reach. Real problems
+  rarely arrange themselves so kindly. Numbers wanted next often sit far apart -- every eighth
+  element, or a column threaded through a grid. A processor offers a dedicated instruction for
+  a case, a gather: hand a gather a list of addresses, receive a register filled from scattered
+  spots.
+
+  A gather feels like power. A single instruction reaching across memory, collecting far-flung
+  values into a tidy row of eight. Surely a chip earns a keep here, sparing a programmer a slow
+  manual crawl.
+
+  A first timing encourages. A 64-value sum, plain against a gather-fed version, optimization
+  off:
+
+      plain  = 3.578 s
+      gather = 2.875 s
+
+  A gather wins. A fancy instruction pays. A thrill returns.
+
+  A thrill, again, rode a broken flag. Optimization off, once more.
+
+  --------
+  A GATHER, TIMED HONESTLY -- A WIDE INSTRUCTION WEARING FOUR SMALL ONES
+
+  Recompile at -O2, a level a real program ships under, and a picture inverts:
+
+      plain loop  = 0.750 s
+      gather      = 1.187 s
+
+  A plain loop -- auto-vectorized, contiguous, boring -- beats a clever gather by more than half.
+  A fancy instruction lost to a dumb one.
+
+  A cause deserves a measurement, not a shrug. Race three loops, every one reading four values
+  and adding them, differing only in how four values arrive, counting processor cycles per
+  operation. A first loads four neighbors. A second gathers four values sitting at identical
+  addresses -- an ordinary contiguous block, fetched via a gather instead of a plain load. A
+  third gathers four scattered values:
+
+      neighbors, plain load        1.35 cycles
+      gather of a contiguous block  5.83 cycles
+      gather of scattered values    6.13 cycles
+
+  A middle line carries a whole story. A gather fed with identical bytes a plain load would
+  fetch -- nothing scattered, nothing far -- still costs four extra cycles over a plain load. A
+  chip cracks one gather into four internal fetches, one per cycle, then reassembles a result.
+  A wide 256-bit instruction, underneath, performs four ordinary loads wearing a costume. A
+  scatter across a third line adds almost nothing on top, because a slowness lived in a
+  instruction itself, not in a distance.
+
+  A promise of a gather -- reach anywhere, one instruction -- turns out true and useless at
+  once. A reach happens. A reach happens four times, sequentially, dressed as one.
+
+  A road forks here. A programmer chasing SIMD by reaching wherever data happens to lie has
+  walked into a wall. A programmer who keeps data contiguous never needs a gather. A difference
+  will decide everything a matrix section reveals later. Hold a thought.
+
+  --------
+  TINY NUMBERS, A SILENT CLIFF -- AND A CHIP REFUSES TO FALL OFF IT
+
+  Set aside layout for a moment and vary values instead. A double holds numbers down to roughly
+  2.2e-308 in a normal range. Below a threshold, arithmetic continues into a subnormal range,
+  values smaller yet, kept alive by a fallback encoding. A fallback carries a reputation: on
+  certain processors, an operation touching a subnormal value traps into microcode and pays a
+  hundred to two hundred cycles, against roughly four for a normal operation. A slowdown by a
+  factor near fifty, triggered by nothing a code review would flag -- values simply drifted
+  small.
+
+  Reproduce a cliff, expecting a plunge. A vector add over an array of 1e-310, a subnormal
+  value, default arithmetic against a mode flushing subnormals to zero:
+
+      subnormal, default mode  = 0.265 s
+      flushed to zero          = 0.250 s
+
+  No cliff. No plunge. A test chip -- Zen 2 -- handles subnormals on a fast path and shrugs.
+
+  A result reads at first like relief, then curdles. A penalty is real; a penalty belongs to
+  Intel silicon, absent on a AMD laptop under a keyboard. One binary, identical bytes, runs
+  fine on a developer machine and crawls by fifty times on a production server across a hall. A
+  bug hides not in a code, not in a review, but in a interaction between a value and a vendor. A
+  worst kind of defect wears a face of a passing test.
+
+  Nothing to fix locally. Nothing to see locally. A cliff waits elsewhere, patient.
+
+  --------
+  A WALL WE EXPECTED -- MEMORY BANDWIDTH
+
+  Arithmetic per instruction has grown wide. Memory feeding arithmetic has not grown at a pace.
+  A textbook fear follows: once a working set outgrows cache, a processor stalls waiting for RAM,
+  arithmetic width stops mattering, and a hand-written vector loop collapses toward a plain
+  loop, every kernel pinned at a bandwidth of a bus.
+
+  A prediction is concrete, so test a prediction. A streaming add, C equals A plus B, over two
+  sizes: a small array living inside cache, and a large array of 64 megabytes per operand,
+  blowing past an 8-megabyte cache. Plain auto-vectorized loop against a hand-written vector
+  loop, throughput in gigabytes per second:
+
+      small, inside cache:   plain 76.7 GB/s    hand-vector 88.6 GB/s    ratio 1.16x
+      large, past cache:     plain 16.8 GB/s    hand-vector 43.0 GB/s    ratio 2.56x
+
+  --------
+  A WALL REFUSING TO ARRIVE
+
+  Read a large row again. A hand-written vector loop did not collapse toward a plain loop past
+  cache. A gap WIDENED, from 1.16x inside cache to 2.56x outside. A prediction inverted.
+
+  A reason repays a stare. RAM delivers data in whole cache lines, and a processor keeps only a
+  handful of line requests in flight at once. A plain scalar loop asks for eight bytes at a time
+  and cannot issue requests fast enough to keep a pipe full, leaving bandwidth stranded. A
+  wide load demands a whole line four times faster, saturates a request queue, and reaches a bus
+  ceiling a scalar loop never touches. Past cache, a wide load is not a victim of a memory wall
+  -- a wide load is a tool for reaching a wall at all.
+
+  A memory wall exists. A wall shows up as an absolute ceiling: peak throughput fell from near
+  89 down to 43 gigabytes per second once data left cache, and every kernel slowed. A folklore
+  attached to a wall -- "SIMD stops helping past cache" -- did not survive contact with a clock.
+  A prediction confident enough to publish turned out backwards on a machine under a hand.
+
+  Two sections, two textbook expectations, two inversions. A subject resists intuition harder
+  than a subject admits.
+
+  --------
+  A SELF-INFLICTED WOUND -- FOLDING TOO EAGERLY
+
+  Failures so far arrived from memory and from vendors. A next failure arrives from a
+  programmer's own hand, from a small choice inside a loop.
+
+  A four-slot sum, built earlier, kept four running totals and folded into one number a single
+  time, at a very end. A tempting variation folds after every grab: pull four values, collapse
+  four into one immediately, add a one into a scalar running total, repeat. A variation reads
+  cleaner to a mind trained on scalar sums. Time a variation, alongside a plain loop and a
+  fold-once version, a 64-value sum:
+
+      plain loop            2.937 s
+      fold once, at an end  1.531 s
+      fold after every grab  3.610 s
+
+  A fold-every-grab version runs slower than a plain loop carrying no vector code. A vector
+  multiply and add are identical across both vector versions; a only difference is a collapse. A
+  cross-slot collapse costs a small pile of shuffle-and-add work, and paying a pile once at a
+  end costs nothing, while paying a pile sixteen times per pass buries a benefit under overhead.
+
+  A discipline earns its keep: hold many slot-totals, collapse a single time. A discipline
+  violated hands a programmer a vector loop slower than a loop a programmer disdained.
+
+  --------
+  SO, AT LAST, A MATRIX -- WHERE MOST BEGIN
+
+  Every rung so far avoided a matrix on purpose. A matrix multiply is where blogs open, and a
+  reason a matrix opens blogs is a reason a matrix belongs at an end here: a matrix hides every
+  trap collected above under a familiar surface.
+
+  A single output cell of a product C equals A times B, row of A against column of B, pairwise
+  multiply, sum:
+
+      A row 0:   1  2  3  4
+      B:        10 11 12 13     row 0
+                20 21 22 23     row 1
+                30 31 32 33     row 2
+                40 41 42 43     row 3
+
+      C[0][0] = 1x10 + 2x20 + 3x30 + 4x40 = 10 + 40 + 90 + 160 = 300
+
+  A tempting SIMD move follows every reflex trained above. Four multiplies wait; a register holds
+  four. Grab four from a row of A, grab four from a column of B, multiply four pairs, fold into
+  one:
+
+      A row 0:      1  2  3  4       neighbors, a clean pull
+      B column 0:  10 20 30 40       a column, walking down
+      multiply:    10 40 90 160
+      fold:        10 + 40 + 90 + 160 = 300
+
+  Compile, run, print. C[0][0] equals 300. A dot product vectorized, a correct answer, a matrix
+  yielding to SIMD at long last. Excitement, one final time.
+
+  --------
+  A CORRECT ANSWER, A RUINOUS SPEED
+
+  A move above carries two passengers a earlier road already named. A column of B walks DOWN
+  memory, and a column scatters -- a gather, four fetches wearing one instruction. And four
+  products belong to one output cell, so a fold runs at an end of every cell, sixteen collapses
+  per row, a self-inflicted wound multiplied across a whole grid.
+
+  Time a full multiply, 256 by 256, four builds, every build agreeing on every cell. A first
+  pair shares identical source -- a plain triple loop -- compiled two ways, vectorization forced
+  off and left on. A third is a dot-product vector kernel above, gather plus fold. A fourth waits
+  for a next section:
+
+      plain loop, vectorization off              = 3.6 s
+      plain loop, compiler vector, no intrinsics  = 0.52 s
+      hand dot-product SIMD, gather + fold        = 3.9 s
+
+  Read a third line against a first. A hand-written SIMD kernel, built from real intrinsics,
+  landed SLOWER than a plain loop carrying no vector code at all. Every gather, every fold, every
+  clever instruction, bought less than nothing.
+
+  Read a third line against a second. A plain loop a programmer wrote without a single intrinsic,
+  handed to a compiler, ran seven times faster than a hand-crafted vector kernel. A definition
+  memorized -- single instruction, multiple data -- predicted a triumph and delivered a defeat.
+  A gather and a fold, invisible to a definition, decided an outcome, and decided against a hand.
+
+  A whole road, and a road ends at a kernel slower than doing nothing special. A darkest point.
+
+  --------
+  A TRANSPOSE BUYS BACK MOST OF A LOSS
+
+  A first instinct on seeing a ruin blames a idea -- a dot product itself. A blame misfires. A
+  villain was never a dot product; a villain was a gather feeding a dot product from a scattered
+  column. Remove a scatter, and a dot product recovers.
+
+  Transpose B once into a scratch buffer, a single pass over a grid, converting every column into
+  a row. A column of B, formerly scattered, becomes a row of a transposed copy, contiguous. A dot
+  product now reads two contiguous rows, multiplies, folds -- no gather anywhere:
+
+      hand dot-product, raw gather         = 3.9 s
+      transpose B once, then dot product   = 0.30 s
+
+  A factor near ten, recovered, from deleting a gather and nothing else. A fold at an end of
+  every cell survives, and a fold caps a recovery short of a best, yet a difference between 3.9
+  and 0.30 seconds came entirely from refusing to reach across scattered memory. A lesson from a
+  gather section, delayed several rungs, collects a debt here.
+
+  A dot-product formulation, condemned a section ago, stands rehabilitated -- once data feeding
+  a formulation stops scattering.
+
+  --------
+  A SHAPE FLIP NOBODY DRAWS FIRST
+
+  A transpose repaired a feed and left a fold. A fold survives because four numbers in a register
+  remained four pieces of ONE answer, demanding a collapse. A final move dissolves a fold by
+  refusing to hold pieces of one answer at all.
+
+  Hold four DIFFERENT answers per register instead: C[0][0], C[0][1], C[0][2], C[0][3], one per
+  slot, four output cells growing at once. Feeding four different answers needs one value of A,
+  copied across four slots, multiplied against a ROW of B -- because four neighboring cells of C
+  differ only by column, and columns 0,1,2,3 of a single row of B sit contiguous:
+
+      A[0][0] = 1  copied ->  1  1  1  1
+      B row 0 (neighbors):    10 11 12 13
+      multiply:               10 11 12 13
+      into four cells:        C00=10  C01=11  C02=12  C03=13
+
+      next value of A row, next ROW of B, add on top:
+      A[0][1]=2 x row 1 (20 21 22 23)  ->  50 53 56 59
+      A[0][2]=3 x row 2 (30 31 32 33)  ->  140 146 152 158
+      A[0][3]=4 x row 3 (40 41 42 43)  ->  300 310 320 330
+
+  A first slot lands 300, a correct C[0][0], alongside 310, 320, 330 arriving free in a single
+  walk. Every load pulls a row of B, contiguous, never a column. No gather, anywhere. And four
+  slots hold four separate answers, never pieces of one, so nothing folds -- a store writes four
+  finished cells straight out.
+
+  A fourth build, timed against a rest:
+
+      plain loop, vectorization off              = 3.6 s
+      plain loop, compiler vector                 = 0.52 s
+      hand dot-product SIMD, gather + fold        = 3.9 s
+      hand SIMD, broadcast a row, no fold          = 0.25 s
+
+  A last kernel reaches 0.25 seconds -- twice a compiler's auto-vectorized loop, fifteen times a
+  memorizer's gather kernel. A gather gone, a fold gone, both dissolved by one decision about
+  what a register holds. A decision runs opposite to a scalar dot-product a mathematics textbook
+  teaches, and opposite to a first reflex every rung above obeyed.
+
+  A formulation reaching 0.25 seconds carries a textbook name, an outer-product formulation, an
+  ikj loop ordering, published decades ago, taught in a first week of a high-performance course.
+  A shape most SIMD blogs open a first paragraph with. A shape arrived at here on a final line of
+  a notebook, over a heap of slower corpses -- a naive gather, a folded reduction, a compiler
+  quietly outrunning a hand, a memory wall pointing a wrong way, a subnormal cliff invisible under
+  a keyboard.
+
+  Others begin where a road above ends. A road above ends where others begin, worn down to a
+  starting line, holding four numbers 300 310 320 330 in a register, a walk finally contiguous,
+  a fold finally absent, a matrix finally fast, and a clock reading a quarter of a second on a
+  problem a first section would have sworn a chip could crush in an instant.

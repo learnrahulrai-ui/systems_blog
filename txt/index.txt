@@ -14,6 +14,7 @@
   are copied from the terminal, not guessed.
 
   >> START HERE:
+     [Introduction to SIMD](posts/introduction-to-simd.txt)
      [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
      [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
      [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
@@ -21,6 +22,15 @@
      [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
      [TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall](posts/tcp-under-pressure-connect-timeout-sws-blocking-wall.txt)
      [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
+
+  [Introduction to SIMD](posts/introduction-to-simd.txt)
+    2026-07-23 . special . simd, avx, gather, denormals, memory-bandwidth, matmul, c
+    A researcher's notebook, not a victory lap. From four numbers and one add, down a long road
+    of results a first draft did not predict: a three-times speedup that was only crippled -O0,
+    a gather that is four loads wearing one instruction, a subnormal cliff a test chip refuses
+    to fall off, a memory wall pointing backwards, a reduction that runs slower than doing
+    nothing -- arriving, exhausted, at the outer-product matrix kernel every other blog opens
+    with. Excitement, then disappointment, on repeat. Every number compiled and timed.
 
   [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
     2026-07-23 . special . simd, avx, matmul, memory-layout, gather, mental-model, c
