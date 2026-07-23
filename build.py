@@ -53,7 +53,7 @@ DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 # color-scheme meta below), so it costs zero bytes. Everything else -- monospace,
 # preserved whitespace, no wrapping -- is already the browser default for <pre>.
 # Inlined, so the page is a single HTTP request: readable on a GPRS connection.
-STYLE = ("pre{max-width:100ch;margin:0 auto;padding:1em}"
+STYLE = ("pre{max-width:100ch;margin:0 auto;padding:1em;font-size:1.5em}"
          "code.hl{display:block;background:rgba(128,128,128,.12);"
          "border-left:3px solid rgba(128,128,128,.5);padding:.35em .7em;margin:.4em 0}")
 
