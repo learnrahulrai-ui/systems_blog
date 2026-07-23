@@ -53,7 +53,9 @@ DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 # color-scheme meta below), so it costs zero bytes. Everything else -- monospace,
 # preserved whitespace, no wrapping -- is already the browser default for <pre>.
 # Inlined, so the page is a single HTTP request: readable on a GPRS connection.
-STYLE = "pre{max-width:100ch;margin:0 auto;padding:1em}"
+STYLE = ("pre{max-width:100ch;margin:0 auto;padding:1em}"
+         "code.hl{display:block;background:rgba(128,128,128,.12);"
+         "border-left:3px solid rgba(128,128,128,.5);padding:.35em .7em;margin:.4em 0}")
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -180,6 +182,12 @@ def build_one(txt_path: Path, blurbs: dict[str, dict]) -> dict:
 
     # Escape HTML special chars first, then lay links over the escaped text.
     escaped = html.escape(body_text, quote=False)
+    # Wrap ```lang ... ``` fenced blocks in a tinted <code> so code stands out.
+    escaped = re.sub(
+        r"(?ms)^```[^\n]*\n(.*?)\n```[ \t]*$",
+        lambda m: '<code class="hl">' + m.group(1) + "</code>",
+        escaped,
+    )
     body = render_links(escaped)
 
     out_path = ROOT / rel.with_suffix(".html")
