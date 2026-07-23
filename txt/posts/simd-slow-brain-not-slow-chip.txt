@@ -1,0 +1,357 @@
+@title Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- A LADDER FROM FOUR NUMBERS TO ONE MATRIX CELL
+  Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip
+  ============================================================================================
+
+
+  Hand a person four facts -- S is single, I is instruction, M is multiple, D is data -- plus a
+  matrix and a pile of intrinsics, and watch what gets built. Measured below, on one ordinary
+  laptop: a matrix multiply written by a memorizer runs 0.469 seconds. A plain loop with no
+  intrinsics at all runs 0.062 seconds. Memorized SIMD came out SEVEN times SLOWER than writing
+  no SIMD whatsoever. Every number identical, every answer correct. Only speed collapsed.
+
+  Silicon did not fail there. A mental model did. Almost every slow or wrong SIMD program traces
+  back to a picture in a head, not a flaw in a chip. So a picture is what gets built here, one
+  rung at a time, from four bare numbers up to one cell of a matrix product -- numbers and arrows
+  first, C code second, a timed race last.
+
+  Two questions ride along at every rung, and answering them out loud before reading on is how a
+  picture sticks instead of a quotation:
+      ?   happy path  -- what must happen for a right answer?
+      ??  unhappy path -- what quietly breaks it, or makes it crawl?
+
+  --------
+  FOUR NUMBERS RIDE IN ONE ADD, NO ARRAY REQUIRED
+
+      lane:   0   1   2   3
+              1   2   3   4
+          +  10  20  30  40
+          =  11  22  33  44          one add instruction, four results at once
+
+  No array yet. Four numbers sit side by side inside one 128-bit slot; four more sit in a second
+  slot; one add produces four answers together. A whole word of SIMD, drained of mystery:
+  four numbers, one instruction, four results.
+
+      ?   happy: four answers appear together -> 11 22 33 44.
+      ??  unhappy: a beginner waits for ONE answer, then hunts for where a "sum" went. No sum was
+          asked for. Four independent results is correct.
+
+  --------
+  WHICH MEANS AN ARRAY IS ONLY NEIGHBORS PULLED IN FOUR AT A TIME
+
+      array:  1 2 3 4 5 6 7 8
+      grab 1 2 3 4 -> double -> 2 4 6 8
+      grab 5 6 7 8 -> double -> 10 12 14 16
+      result: 2 4 6 8 10 12 14 16
+
+  Eight numbers, covered by two grabs of four neighbors. Neighbors, because four values glued
+  together in memory ride into one slot in a single pull.
+
+      ??  unhappy, plant a seed now: if four wanted values are NOT neighbors, one pull cannot
+          fetch them. Hold a thought there; it decides everything later.
+
+  --------
+  A SUM KEEPS FOUR RUNNING TOTALS AND FOLDS ONLY ONCE
+
+      1 2 3 4 5 6 7 8, add it all.
+
+      grab 1 2 3 4
+      grab 5 6 7 8
+      add slot to slot ->  6  8 10 12      four running totals, one per lane
+      fold once        ->  6+8+10+12 = 36
+
+  A sum does not pour eight numbers into one accumulator eight times. Four accumulators grow in
+  parallel, one per lane, and collapse into one number a single time, at a very end.
+
+      ?   happy: four partials 6 8 10 12, folded once -> 36.
+      ??  unhappy: fold after every grab instead of once, and a cross-lane collapse gets paid
+          again and again. Measured later: folding too often runs slower than a plain loop.
+
+  --------
+  SWAP PLUS FOR TIMES AND A PRODUCT FALLS OUT UNCHANGED
+
+      1 2 3 4 1 1 1 1, multiply it all.
+
+      grab 1 2 3 4
+      grab 1 1 1 1
+      multiply slot to slot -> 1 2 3 4
+      fold once with x       -> 1*2*3*4 = 24
+
+  Shape did not move. Only an operator changed, plus to times. Four partials, one fold. A sum and
+  a product are one skeleton wearing a different operator. Skeleton is a real idea; operator is a
+  costume.
+
+  --------
+  TWO ARRAYS, ONE ADD, POSITION BY POSITION
+
+      A:  1  2  3  4
+      B: 10 20 30 40
+      +: 11 22 33 44
+
+  Two feeds, one operator, four results. Lane 0 adds A0 to B0, lane 3 adds A3 to B3. No lane ever
+  reaches into a neighbor.
+
+  --------
+  AND AN OPERATOR STAYS FREE -- MINUS, TIMES, WHATEVER
+
+      A - B: -9 -18 -27 -36
+      A * B: 10  40  90 160
+
+  A feed shape is fixed; an operator floats. Once neighbors ride in a slot, plus or minus or times
+  costs one instruction each. Feeding a slot is a real problem; picking an operator is not.
+
+  --------
+  A MATRIX IS ONE LONG LINE, PROVEN BY SUMMING IT
+
+      matrix:   1 2 3 4        stored flat as: 1 2 3 4 5 6 7 8
+                5 6 7 8
+
+      grab 1 2 3 4
+      grab 5 6 7 8
+      add -> 6 8 10 12, fold -> 36
+
+  A matrix carries no special power in memory. Row after row, one continuous line. Summing a
+  matrix is summing an array, because a matrix already is an array wearing a rectangle.
+
+      ??  unhappy, seed fully grown now: a ROW of a matrix is neighbors -- positions 0,1,2,3. A
+          COLUMN of a matrix is NOT -- positions 0, 4, 8, 12, a whole row apart. One pull grabs a
+          row for free. A column scatters.
+
+  --------
+  SO NOW ONE CELL OF A MATRIX PRODUCT -- C00 AND NOTHING ELSE
+
+  Three entry points, named plainly, before a single multiply:
+      code entry     -- first numbers touched: a row of A, a column of B.
+      happy customer -- a correct answer C00 must equal a hand result.
+      angry customer -- whatever makes a correct answer arrive slowly.
+
+      A row 0:   1  2  3  4
+      B:        10 11 12 13      <- row 0
+                20 21 22 23      <- row 1
+                30 31 32 33      <- row 2
+                40 41 42 43      <- row 3
+
+  One cell is one row of A walked across, times one column of B walked down:
+
+      C00 = 1x10 + 2x20 + 3x30 + 4x40
+          =   10 +  40 +  90 + 160
+          = 300
+
+      ?   happy: a dot product, walking DOWN column 0 of B: 10 20 30 40, lands 300.
+
+  --------
+  WHICH TEMPTS A MEMORIZER INTO A DOT PRODUCT INSIDE A SLOT
+
+  Four multiplies wait; a slot holds four. So grab four from a row of A, four from a column of B,
+  multiply, add four into one:
+
+      from A row 0:      1  2  3  4         neighbors, one clean pull
+      from B column 0:  10 20 30 40         going DOWN
+      multiply:         10 40 90 160
+      fold four -> one: 10+40+90+160 = 300
+
+  A correct answer. 300. A memorizer stops here, satisfied, and ships a matrix multiply built out
+  of a slot-sized dot product. Two costs hide inside, both invisible to a memorized definition.
+
+      ??  unhappy, cost one: 10 20 30 40 is a COLUMN of B. In memory a column scatters --
+          positions 0, 4, 8, 12. No single pull fetches scattered numbers; a chip cracks a "gather"
+          into four separate fetches, one per cycle. A wide instruction quietly became four loads.
+      ??  unhappy, cost two: four products are four pieces of ONE answer, so a fold into one runs
+          at an end of every cell. A collapse per cell, forever.
+
+  Both costs arrive together, out of one decision: a slot was filled with pieces of a single
+  answer. Now watch a race pay for one decision.
+
+  ============================================================================================
+  SECOND HALF -- ONE LADDER AGAIN, NOW AS RUNNABLE C
+  ============================================================================================
+
+  Every rung above, hardcoded and unrolled, four-wide. Compiled with g++ 14.4.0, -mavx2 -O2, on
+  an AMD Ryzen 7 5700U. Output printed right under a program, copied from a real run.
+
+```c
+#include <immintrin.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* four numbers, one add */
+    float o1[4];
+    _mm_storeu_ps(o1, _mm_add_ps(_mm_set_ps(4,3,2,1), _mm_set_ps(40,30,20,10)));
+    printf("four numbers:  %g %g %g %g\n", o1[0],o1[1],o1[2],o1[3]);
+
+    /* one array, double each of eight */
+    float a[8] = { 1,2,3,4,5,6,7,8 };
+    float o2[8];
+    _mm_storeu_ps(&o2[0], _mm_mul_ps(_mm_loadu_ps(&a[0]), _mm_set1_ps(2)));
+    _mm_storeu_ps(&o2[4], _mm_mul_ps(_mm_loadu_ps(&a[4]), _mm_set1_ps(2)));
+    printf("array x2:      %g %g %g %g %g %g %g %g\n",
+           o2[0],o2[1],o2[2],o2[3],o2[4],o2[5],o2[6],o2[7]);
+
+    /* sum an array: four partials, fold once */
+    float p[4];
+    _mm_storeu_ps(p, _mm_add_ps(_mm_loadu_ps(&a[0]), _mm_loadu_ps(&a[4])));
+    printf("array sum:     %g (from %g %g %g %g)\n", p[0]+p[1]+p[2]+p[3], p[0],p[1],p[2],p[3]);
+
+    /* product: swap + for * */
+    float q[4] = { 1,2,3,4 }, r[4] = { 1,1,1,1 }, w[4];
+    _mm_storeu_ps(w, _mm_mul_ps(_mm_loadu_ps(q), _mm_loadu_ps(r)));
+    printf("array product: %g\n", w[0]*w[1]*w[2]*w[3]);
+
+    /* two arrays: +, -, * */
+    float A[4] = { 1,2,3,4 }, B[4] = { 10,20,30,40 }, s[4];
+    _mm_storeu_ps(s, _mm_add_ps(_mm_loadu_ps(A), _mm_loadu_ps(B)));
+    printf("two arrays +:  %g %g %g %g\n", s[0],s[1],s[2],s[3]);
+    _mm_storeu_ps(s, _mm_sub_ps(_mm_loadu_ps(A), _mm_loadu_ps(B)));
+    printf("two arrays -:  %g %g %g %g\n", s[0],s[1],s[2],s[3]);
+    _mm_storeu_ps(s, _mm_mul_ps(_mm_loadu_ps(A), _mm_loadu_ps(B)));
+    printf("two arrays *:  %g %g %g %g\n", s[0],s[1],s[2],s[3]);
+    return 0;
+}
+```
+
+  Running it prints:
+
+      four numbers:  11 22 33 44
+      array x2:      2 4 6 8 10 12 14 16
+      array sum:     36 (from 6 8 10 12)
+      array product: 24
+      two arrays +:  11 22 33 44
+      two arrays -:  -9 -18 -27 -36
+      two arrays *:  10 40 90 160
+
+  --------
+  AND C00 BY A MEMORIZER'S MODEL -- GATHER A COLUMN, REDUCE AT AN END
+
+```c
+#include <immintrin.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* row 0 of A = 1 2 3 4 ; B is 4 wide, column 0 = 10 20 30 40 */
+    float A[4] = { 1, 2, 3, 4 };
+    float B[16] = { 10,11,12,13,  20,21,22,23,  30,31,32,33,  40,41,42,43 };
+
+    /* four from A row (neighbors) */
+    __m128 va = _mm_loadu_ps(&A[0]);
+    /* four from B COLUMN 0 -> positions 0,4,8,12 -> scattered -> gather */
+    __m128i idx = _mm_setr_epi32(0*4+0, 1*4+0, 2*4+0, 3*4+0);
+    __m128 vb = _mm_i32gather_ps(B, idx, 4);
+
+    __m128 prod = _mm_mul_ps(va, vb);             /* 10 40 90 160 -- four pieces of C00 */
+    float t[4]; _mm_storeu_ps(t, prod);
+    float c00 = t[0] + t[1] + t[2] + t[3];        /* reduce four -> one */
+    printf("C00 (gather+reduce) = %g\n", c00);
+    return 0;
+}
+```
+
+  Running it prints:
+
+      C00 (gather+reduce) = 300
+
+  Correct. 300. A gather fetched a scattered column, a reduce folded four pieces into one. Both
+  cost real time, and a full matrix pays them per cell.
+
+  ============================================================================================
+  LAST HALF -- A RACE, AND A MENTAL MODEL SHOT DEAD
+  ============================================================================================
+
+  One 256 by 256 matrix multiply, three ways, each run 20 times, every result checked equal.
+  Scalar is a plain triple loop, no intrinsics. My-model is a memorizer's SIMD: per cell, gather
+  a column, reduce at an end. Fast broadcasts one value of A across a ROW of B and never reduces.
+
+      check C00: scalar 3045   my-model 3045   fast 3045     (identical answers)
+      scalar   time = 0.062 s
+      my-model time = 0.469 s      <- SIMD, and SEVEN times slower than no SIMD
+      fast     time = 0.031 s      <- SIMD, twice as fast as no SIMD
+
+  Read those two SIMD lines twice. Identical chip. Identical answer. One SIMD program runs 15
+  times slower than another SIMD program, and 7 times slower than a beginner loop never once
+  touching an intrinsic. A processor did nothing wrong. A picture did.
+
+  --------
+  WHY A MEMORIZER'S SIMD CRAWLS -- GATHER PLUS REDUCE, PER CELL
+
+  Cost one, a gather. A column of B scatters across memory, so a wide pull cracks into four
+  separate element fetches. Cost two, a reduce. Four products are pieces of one cell, so a
+  cross-lane fold runs at an end of every cell. Multiply both costs by 256x256 cells, and a
+  slow picture buries fast silicon.
+
+  A memorized definition -- single instruction, multiple data -- predicts none of it. It cannot,
+  because both costs live in memory layout and loop shape, not in a definition. A poser recites S,
+  I, M, D and walks straight into a gather. Days vanish chasing a compiler flag, blaming a chip,
+  reading a manual, when a whole fault sits in one sentence: a slot was loaded with pieces of one
+  answer.
+
+  --------
+  ONE CHANGE FIXES BOTH -- HOLD FOUR ANSWERS, NOT FOUR PIECES OF ONE
+
+  Stop putting four pieces of C00 into a slot. Put four DIFFERENT answers into it: C00, C01, C02,
+  C03, one per lane. To feed four different answers, take ONE value of A, copy it four times, and
+  multiply across a ROW of B, because C00 C01 C02 C03 differ only by column, and columns 0,1,2,3
+  of one row are neighbors:
+
+      A[0][0] = 1  ->  copy 4x  ->  1  1  1  1
+      B row 0 (neighbors):          10 11 12 13
+      multiply:                     10 11 12 13
+      drop into four boxes:         C00=10  C01=11  C02=12  C03=13
+
+      next value of A row, next ROW of B, add on top:
+      A[0][1]=2 x B row 1: 20 21 22 23  ->  boxes 50 53 56 59
+      A[0][2]=3 x B row 2: 30 31 32 33  ->  boxes 140 146 152 158
+      A[0][3]=4 x B row 3: 40 41 42 43  ->  boxes 300 310 320 330
+
+  Box 0 finished at 300 -- identical to a hand result. Boxes 1, 2, 3 arrived at 310, 320, 330 for
+  free, in one walk. Watch both costs die from one decision:
+
+      four pieces of ONE answer      ->    four DIFFERENT answers
+      must fold boxes (reduce)       ->    never fold boxes           = no reduce
+      feed DOWN a column (scatter)   ->    feed ACROSS a row (neighbor) = no gather
+
+  A gather and a reduce were never two separate bugs. Two shadows, one choice: which direction a
+  slot slices. Slice down a dot product -> pieces of one answer, fed from a scattered column.
+  Slice across outputs -> different answers, fed from a neighbor row. Flip a slice, both costs
+  flip, in one stroke. A fast column of a race above did exactly so, and clocked 0.031 seconds.
+
+  --------
+  WHICH A MEMORIZER CANNOT FAKE -- FLIP STORAGE AND WATCH A WINNER SWAP
+
+  A real picture survives a twist a quotation cannot. Store B by COLUMN instead of by row. Now a
+  column of B is neighbors, and a row scatters. Which model wins?
+
+      ?   happy recall: grab whatever direction sits glued together in memory.
+      ??  unhappy recall: never pull across a scattered direction.
+
+  A memorizer's dot-product model, slow a moment ago, becomes fast, because a column it wanted is
+  now contiguous. A broadcast-row model, fast a moment ago, becomes slow. Neither model is holy.
+  A only rule holds: grab a contiguous direction, refuse a scattered one. A person carrying a
+  picture answers in a second. A person carrying four letters -- S I M D -- cannot answer at all.
+
+  --------
+  SO A CLOSING FACT FOR ANY BRAIN FROZEN HERE
+
+  A memorized definition builds a matrix multiply 7 times slower than a beginner loop, and 15
+  times slower than a good one, on identical silicon. A gap is a mental model, start to end.
+
+  A struggle here carries famous company. A top high-performance course spends a whole week on
+  ordering these loops. An author of a world's linear-algebra library co-wrote a paper on doing
+  exactly a cell above. A standard math library ships a kernel hand-written in assembly for every
+  chip, because no compiler earns it alone. If a ladder above bent your brain at a column, a
+  hardest working part of a subject is precisely where a brain bent.
+
+  Memorize four letters and produce slow code. Carry a picture -- neighbors ride in a slot, a
+  column scatters, hold answers not pieces -- and produce fast code on a matrix never seen before.
+  A difference was never a chip.
+
+  ============================================================================================
+  Built and run on an AMD Ryzen 7 5700U (AVX2, no AVX-512), g++ 14.4.0, -mavx2 -O2. Every number
+  copied from a real compile and run. Row-major storage unless a swap is stated. Four-wide slots
+  shown for clarity; eight-wide behaves identically, only lane count grows.

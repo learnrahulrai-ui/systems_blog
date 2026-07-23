@@ -14,12 +14,20 @@
   are copied from the terminal, not guessed.
 
   >> START HERE:
+     [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
      [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
      [The Full Journey: One File, Two Roles, and Every Wall TCP Put in Our Way](posts/tcp-the-full-journey-support-consumer.txt)
      [Support and Consumer: How a Shared File Forced Us Into TCP](posts/support-consumer-shared-file-forced-tcp.txt)
      [TCP: The Whole Contract](posts/tcp-the-whole-contract.txt)
      [TCP Under Pressure: connect() Timeout, Silly Window, and the Blocking Wall](posts/tcp-under-pressure-connect-timeout-sws-blocking-wall.txt)
      [Why a Brand-New Process Inherits Another's Network Speed](posts/inherited-network-speed.txt)
+
+  [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
+    2026-07-23 . special . simd, avx, matmul, memory-layout, gather, mental-model, c
+    A ladder from four bare numbers up to one cell of a matrix product, numbers and arrows
+    first, C second, a timed race last. A memorizer's SIMD matrix multiply clocks 7x slower
+    than a plain loop and 15x slower than a good one -- identical chip, identical answer. Most
+    slow SIMD is a slow mental model, proven by compiling and timing all three.
 
   [1999: Three Doors Into select() — and the One That Blue-Screens Windows](posts/1999-select-fdsetsize-three-doors.txt)
     2026-07-17 . special . select, fd_set, c10k, windows, bsod, minicom

@@ -11,6 +11,14 @@
   SPECIALS
   --------
 
+  [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](posts/simd-slow-brain-not-slow-chip.txt)
+    2026-07-23 . special . simd, avx, matmul, memory-layout, gather, reduce, mental-model, c
+    A ladder from four bare numbers to one matrix cell: plain numbers, arrays, sum, product,
+    two-array add/subtract/multiply, a matrix as one flat line, then C00 by a memorizer's
+    gather-and-reduce model. A three-way timed race proves memorized SIMD runs 7x slower than
+    a plain loop and 15x slower than a good kernel on identical silicon -- the gap is the
+    mental model, not the chip. Every number copied from a real compile and run.
+
   [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
     2026-07-17 . special . databases, ram, disk, select, c10k, bsod, minicom
     Ten years of a one-user chat CLI, built one year at a time, run into the same
