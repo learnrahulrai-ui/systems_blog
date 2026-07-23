@@ -235,11 +235,35 @@
   Output:
       inside cache: one-word 76.7 ; four-word 88.6
       past cache:   one-word 16.8 ; four-word 43.0
-  Finding: past cache a four-word read is 2.56x a one-word read; inside cache 1.16x. A gap widens
-           past cache. Peak fell 89 -> 43 past cache.
-  Failure: a prediction of width no longer helping past cache is not observed.
-  Cause: a one-word loop cannot issue block requests fast enough to fill a memory path; a wide
-         read does. Absolute throughput halves past cache for both.
+  Finding as first read: past cache a four-word read 2.56x a one-word read.
+  Failure: MEASUREMENT INVALID, retracted. Three defects: a one-word kernel ran first and
+           absorbed first-touch page faults a wide kernel then avoided; timing used clock();
+           no pre-touch pass preceded timing.
+  Cause: order and page-fault bias, not throughput.
+  Next: rebuild a measurement with every defect removed.
+
+  --------
+  EXPERIMENT 14b -- a data set larger than cache, corrected (file: memwall2.c)
+
+  Objective: repeat Experiment 14 with bias removed.
+  Data: 3 arrays x 64 MiB = 192 MiB; 10 passes per trial; 6 trials.
+  Method: every page pre-touched before timing; kernel order alternated each trial; timing by
+          clock_gettime(CLOCK_MONOTONIC); kernels noinline; checksum consumed after each timed
+          region; scalar kernel forced non-vectorized.
+  Build: gcc -mavx2 -O2 -std=c99 memwall2.c -o memwall2
+  Output:
+      trial 0  scalar,simd   11.4   13.4
+      trial 1  simd,scalar   12.2   12.3
+      trial 2  scalar,simd   11.7   13.5
+      trial 3  simd,scalar   12.3   13.7
+      trial 4  scalar,simd   10.7   13.6
+      trial 5  simd,scalar   10.5   12.4
+      best scalar 12.3 GB/s ; best simd 13.7 GB/s ; ratio 1.11
+  Finding: past cache, scalar 12.3 GB/s, wide 13.7 GB/s, ratio 1.11. Width buys no meaningful
+           gain once a working set exceeds a last cache level.
+  Failure: an Experiment 14 result of 2.56x is retracted.
+  Cause: past a last cache level both kernels wait on one memory path and neither can raise a
+         rate a path supplies. Arithmetic ceased to be a limiting resource.
   Next: measure a reduction folded on every step vs once.
 
   --------
@@ -354,8 +378,10 @@
   4. A request formed one address at a turn costs ~4 extra cycles regardless of distance (Exp 11).
   5. A cost measurement at -O0 can invert a -O2 result (Exp 12).
   6. Subnormal values carry a machine-dependent penalty, absent on a test machine (Exp 13).
-  7. Past cache a wide read reaches higher throughput than a one-word loop; absolute peak halves
-     (Exp 14).
+  7. Past cache a wide read buys no meaningful gain: 12.3 vs 13.7 GB/s, ratio 1.11 (Exp 14b).
+     An earlier 2.56x figure (Exp 14) came from kernel order and first-touch page faults, and is
+     retracted. Once a working set exceeds a last cache level, a memory path limits both kernels
+     and width stops paying.
   8. A slot collapse placed per step erases a width gain (Exp 15).
   9. C00 is correct by a column read, and slow; correct and fast by a consecutive row read
      holding a separate cell per slot (Exp 16-20). Column read + collapse 3.9 s; consecutive row
