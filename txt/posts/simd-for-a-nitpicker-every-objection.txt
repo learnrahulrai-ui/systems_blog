@@ -1,0 +1,140 @@
+@title For a Nitpicker: Every Fair Objection to Those SIMD Numbers :: Rahul's Systems Blog
+==============================================================================================
+  RAHUL'S SYSTEMS BLOG -- systems programming, worked out by hand                     est. 2026
+==============================================================================================
+  [home](../index.txt) | [about](../about.txt) | [archive](../archive.txt) | [glossary](../glossary.txt) | [contact](mailto:learn.rahul.rai@gmail.com)
+----------------------------------------------------------------------------------------------
+
+  SPECIAL -- WHAT A CRITIC WILL SAY, AND WHERE A CRITIC IS RIGHT
+  For a Nitpicker: Every Fair Objection to Those SIMD Numbers
+  ============================================================================================
+
+
+  A companion post argued a slow SIMD matrix multiply is a slow mental model, not a slow chip.
+  Numbers there are real, copied from runs. Numbers are also easy to frame dishonestly, so a
+  hard-nosed reader deserves every objection laid out and answered, or conceded. Below, a full
+  list, worst first. Where a critic wins, a critic wins out loud.
+
+  --------
+  A "SCALAR" BASELINE WAS SECRETLY VECTORIZED BY A COMPILER -- CORRECT, AND CAUGHT
+
+  A first draft timed a "plain scalar" loop at 0.062 seconds and called a memorizer's hand SIMD
+  "7 times slower than no SIMD." Wrong wording. At -O2 a compiler auto-vectorizes a clean triple
+  loop into vector instructions with no intrinsics written by hand. So a 0.062 baseline already
+  carried SIMD -- a compiler's SIMD.
+
+  A corrected run separates a plain loop into two builds of identical source, one with
+  vectorization forced off, one left on, plus both hand kernels (256x256, 200 repeats, all four
+  agree on every cell):
+
+      plain loop, vectorization OFF          = 3.6 s
+      plain loop + -O2 compiler vector        = 0.52 s
+      memorizer hand SIMD (gather + reduce)   = 3.9 s
+      good hand SIMD (broadcast a row)        = 0.25 s
+
+  A corrected reading is sharper, not weaker. A memorizer's hand SIMD (3.9) even loses to a plain
+  loop carrying no vector code (3.6). A beginner who writes plain code and trusts -O2 (0.52) beats
+  a memorizer by 7x, for free. A good hand model (0.25) beats a compiler by 2x. A companion post
+  now carries corrected numbers.
+
+  --------
+  A GATHER MODEL IS A STRAWMAN -- A REAL PERSON TRANSPOSES B FIRST. PARTLY RIGHT, MEASURED
+
+  A memorizer's slow kernel walks down a column of B, scattered in memory, so a wide load becomes
+  a gather. A fair critic answers: a competent inner-product coder transposes B once, turning a
+  column into a row, and a gather vanishes.
+
+  Correct, and worth a real number. Transpose B into a scratch buffer once, then dot a row of A
+  with a row of a transposed B, both contiguous, reduce per cell:
+
+      memorizer raw gather                        = 3.9 s
+      transpose B once, then dot (no gather)      = 0.30 s     (about 10x faster than a gather)
+      outer-product, broadcast a row (no reduce)  = 0.25 s
+
+  A villain was never an inner product. A villain was a gather. Transpose rescues an inner-product
+  idea into a league beside a broadcast kernel. A memorizer's fault is narrower than "wrong idea"
+  -- a fault is reaching across scattered memory with no fix. A concession stands: a naive gather
+  is a strawman only for a naive coder, and plenty of naive coders ship exactly a naive gather.
+
+  --------
+  NO FMA -- CONCEDED
+
+  A good kernel here multiplies, then adds, as two operations. One fused multiply-add instruction,
+  _mm256_fmadd_ps, folds both into one and pushes a fast number lower. Left separate on purpose,
+  so a multiply and an add stay visible for a reader. A production kernel uses fma.
+
+  --------
+  NO TILING, NO REGISTER BLOCKING -- NOT A BLAS COMPETITOR, CONCEDED LOUDLY
+
+  A "fast" kernel here is fast against a naive loop, not against OpenBLAS or MKL. Two honest gaps:
+      - A fast kernel reloads a strip of C from memory on every k. A real kernel keeps a tile of C
+        inside registers across all of k, and reloads nothing.
+      - A real kernel blocks A, B, C into cache-sized tiles so data stays hot in L1 and L2.
+  With register tiling plus cache blocking, a hand kernel reaches a large fraction of a chip's
+  peak. A kernel here reaches a small fraction. A goal here is a mental model, not a peak-FLOP
+  crown. A crown belongs to BLAS.
+
+  --------
+  256 BY 256 IS SMALL ENOUGH TO SIT IN CACHE -- CONCEDED
+
+  Three 256x256 float matrices are near 768 KB, close to a cache boundary on a test chip, so a
+  race leans compute-bound, not memory-bound. A larger multiply spills to RAM and a memory wall
+  starts to dominate, at which point layout matters even more, not less. A small size flatters
+  every kernel equally, so a RATIO across kernels holds; an absolute second does not transfer to
+  a 4096-wide problem.
+
+  --------
+  CLOCK RESOLUTION IS COARSE, TIMES ARE NOISY -- CONCEDED, SO READ RATIOS
+
+  Timing uses clock(), CPU time at a coarse tick, and a CPU boosts and throttles. Absolute seconds
+  wander run to run by a fifth. A defense is a large repeat count (200) and a focus on a ratio, a
+  15x spread between a memorizer and a good model, not on a third decimal. A ratio survives noise;
+  a decimal does not.
+
+  --------
+  A CYCLE COUNT USED RDTSC, WHICH IS REFERENCE CYCLES -- CONCEDED
+
+  A separate post measured a gather at "about 4.47 cycles" via __rdtsc. rdtsc counts reference
+  cycles at a fixed rate, not true core cycles under boost, so an absolute per-op cycle runs a bit
+  higher in reality. A DELTA between a neighbor load and a gather -- near four, for four scattered
+  fetches -- is a real signal; an absolute cycle is a soft number.
+
+  --------
+  ONE MACHINE, ONE VENDOR, SINGLE THREAD -- CONCEDED, AND VENDOR MATTERS
+
+  Every number comes from one AMD Ryzen 7 5700U (Zen 2), single-threaded, AVX2, no AVX-512. Three
+  honest consequences:
+      - AVX-512 doubles a register to 16 floats. A picture is identical, a lane count grows.
+      - Gather latency varies by microarchitecture; a newer Intel core runs a faster gather. A
+        scattered-memory cost -- multiple cache lines touched -- survives on any chip, faster
+        gather or not.
+      - A denormal (subnormal) slowdown shown elsewhere is an INTEL trait; a test Zen chip did not
+        slow at all. One identical binary can crawl on an Intel server and fly on an AMD laptop. A bug
+        invisible where a test ran is a real hazard, not a footnote.
+
+  --------
+  NOTHING HERE IS NOVEL -- CONCEDED, AND NOT A CLAIM
+
+  An ikj loop order, an outer-product formulation, a cost of a gather, a memory wall: all textbook,
+  decades old, taught in a high-performance course. No result here is new. A only thing offered is
+  a build order -- four bare numbers up to one cell, every claim compiled and run -- aimed at a
+  reader who memorized a definition and cannot yet produce a kernel. Pedagogy, not research.
+
+  --------
+  SO A HONEST BOTTOM LINE
+
+  A headline holds after a hardest objections: on identical silicon, a memorized definition builds
+  a matrix multiply near 15x slower than a good hand model, and loses even to a plain loop a
+  compiler vectorized for free. A biggest correction -- a baseline was compiler-vectorized --
+  makes a point stronger, because a lesson becomes "write plain code and trust -O2 before typing a
+  single bad intrinsic." A second correction -- transpose kills a gather -- narrows a villain from
+  "an inner product" down to "a scattered reach," which is exactly a mental-model claim all along.
+
+  Every number here reproduces. Files compile with g++ 14.4.0, -mavx2 -O2, and print what a post
+  shows. A critic who runs them will land on identical ratios, an identical lesson, an identical
+  corrected wording. A correction is a feature, not a retreat.
+
+  ============================================================================================
+  Machine: AMD Ryzen 7 5700U, AVX2 + FMA, no AVX-512. g++ 14.4.0. Times via clock(), 200 repeats,
+  256x256 float. Read ratios, not third decimals. Corrections above are folded into a companion
+  post, [Most Slow SIMD Is a Slow Mental Model, Not a Slow Chip](simd-slow-brain-not-slow-chip.txt).

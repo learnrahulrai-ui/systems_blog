@@ -27,7 +27,14 @@
     A ladder from four bare numbers up to one cell of a matrix product, numbers and arrows
     first, C second, a timed race last. A memorizer's SIMD matrix multiply clocks 7x slower
     than a plain loop and 15x slower than a good one -- identical chip, identical answer. Most
-    slow SIMD is a slow mental model, proven by compiling and timing all three.
+    slow SIMD is a slow mental model, proven by compiling and timing all four builds.
+
+  [For a Nitpicker: Every Fair Objection to Those SIMD Numbers](posts/simd-for-a-nitpicker-every-objection.txt)
+    2026-07-23 . special . simd, benchmarking, auto-vectorization, honesty, caveats, c
+    Companion caveats. Every hard objection, worst first: the "scalar" baseline was
+    compiler-vectorized (caught and corrected), the gather model is a strawman a transpose
+    repairs (measured, 10x), no FMA, no tiling, not a BLAS competitor, coarse clocks, one AMD
+    chip. Where a critic wins, a critic wins out loud -- and the headline survives.
 
   [1999: Three Doors Into select() — and the One That Blue-Screens Windows](posts/1999-select-fdsetsize-three-doors.txt)
     2026-07-17 . special . select, fd_set, c10k, windows, bsod, minicom

@@ -19,6 +19,16 @@
     a plain loop and 15x slower than a good kernel on identical silicon -- the gap is the
     mental model, not the chip. Every number copied from a real compile and run.
 
+  [For a Nitpicker: Every Fair Objection to Those SIMD Numbers](posts/simd-for-a-nitpicker-every-objection.txt)
+    2026-07-23 . special . simd, benchmarking, auto-vectorization, honesty, caveats, c
+    The companion honesty pass. Worst objection first: the "scalar" baseline was silently
+    auto-vectorized by -O2 (caught, and the correction makes the point stronger -- plain code
+    plus -O2 beats a memorizer's hand SIMD by 7x). Then: transposing B once repairs the gather
+    model to within 10x of raw (so the villain is a scattered reach, not the inner product),
+    no FMA, no register tiling or cache blocking, not a BLAS rival, coarse clock() timing,
+    rdtsc reference cycles, one single-threaded AMD Zen2 chip, and nothing here is novel. Every
+    concession measured or named; the headline holds after all of them.
+
   [The Decade in a Flat File: RAM, Disk, and a BSOD](posts/the-decade-in-a-flat-file.txt)
     2026-07-17 . special . databases, ram, disk, select, c10k, bsod, minicom
     Ten years of a one-user chat CLI, built one year at a time, run into the same

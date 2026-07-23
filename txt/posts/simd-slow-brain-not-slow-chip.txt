@@ -12,9 +12,12 @@
 
   Hand a person four facts -- S is single, I is instruction, M is multiple, D is data -- plus a
   matrix and a pile of intrinsics, and watch what gets built. Measured below, on one ordinary
-  laptop: a matrix multiply written by a memorizer runs 0.469 seconds. A plain loop with no
-  intrinsics at all runs 0.062 seconds. Memorized SIMD came out SEVEN times SLOWER than writing
-  no SIMD whatsoever. Every number identical, every answer correct. Only speed collapsed.
+  laptop, one 256 by 256 matrix multiply: a memorizer's hand-written SIMD version runs 3.9
+  seconds -- dead even with a plain loop carrying no vector code at all. All a memorizer's vector
+  work bought zero speed. A beginner who wrote a plain loop and merely asked a compiler to
+  optimize it, adding no intrinsics whatsoever, runs 0.52 seconds -- 7 times faster than a
+  memorizer's hand SIMD, for free. A good mental model reaches 0.25 seconds, twice as fast as a
+  compiler. Every answer identical, every cell correct. Only speed forked, by a factor of 15.
 
   Silicon did not fail there. A mental model did. Almost every slow or wrong SIMD program traces
   back to a picture in a head, not a flaw in a chip. So a picture is what gets built here, one
@@ -264,18 +267,30 @@ int main(void)
   LAST HALF -- A RACE, AND A MENTAL MODEL SHOT DEAD
   ============================================================================================
 
-  One 256 by 256 matrix multiply, three ways, each run 20 times, every result checked equal.
-  Scalar is a plain triple loop, no intrinsics. My-model is a memorizer's SIMD: per cell, gather
-  a column, reduce at an end. Fast broadcasts one value of A across a ROW of B and never reduces.
+  One 256 by 256 matrix multiply, FOUR ways, each run 200 times, every result checked equal. A
+  first pair shares identical source -- a plain triple loop -- built two ways: vectorization
+  forced off, and left on so a compiler adds vector code for free. My-model is a memorizer's hand
+  SIMD: per cell, gather a column, reduce at an end. Fast broadcasts one value of A across a ROW
+  of B and never reduces.
 
-      check C00: scalar 3045   my-model 3045   fast 3045     (identical answers)
-      scalar   time = 0.062 s
-      my-model time = 0.469 s      <- SIMD, and SEVEN times slower than no SIMD
-      fast     time = 0.031 s      <- SIMD, twice as fast as no SIMD
+      check C00 (all four): 3045 3045 3045 3045          (identical answers)
+      plain loop, no vector code           = 3.6 s
+      plain loop + compiler vector (no intrinsics) = 0.52 s
+      memorizer hand SIMD (gather+reduce)  = 3.9 s
+      good hand SIMD (broadcast row)       = 0.25 s
 
-  Read those two SIMD lines twice. Identical chip. Identical answer. One SIMD program runs 15
-  times slower than another SIMD program, and 7 times slower than a beginner loop never once
-  touching an intrinsic. A processor did nothing wrong. A picture did.
+  Read a middle pair twice. A memorizer hand-wrote real SIMD intrinsics and landed at 3.9
+  seconds -- SLOWER than a plain loop carrying no vector code at all. Every gather, every reduce,
+  bought less than nothing. Meanwhile a beginner who wrote a plain loop and added no intrinsics,
+  merely asking a compiler to optimize, landed at 0.52 seconds -- SEVEN times faster than a
+  memorizer, for free. A good hand model reached 0.25 seconds, TWICE as fast as a compiler and 15
+  times faster than a memorizer. Identical chip. Identical answer. A processor did nothing wrong.
+  A picture did.
+
+  A sharpest cut hides in a middle pair. A memorizer believed intrinsics ARE speed, and typed a
+  pile of them, and won nothing over plain code. A beginner typed no intrinsics, trusted -O2, and
+  a compiler quietly vectorized a clean loop into a 7x win. Bad hand SIMD loses to a compiler; a
+  compiler loses only to a GOOD hand model. A memorizer occupies a worst rung on a ladder.
 
   --------
   WHY A MEMORIZER'S SIMD CRAWLS -- GATHER PLUS REDUCE, PER CELL
@@ -338,8 +353,10 @@ int main(void)
   --------
   SO A CLOSING FACT FOR ANY BRAIN FROZEN HERE
 
-  A memorized definition builds a matrix multiply 7 times slower than a beginner loop, and 15
-  times slower than a good one, on identical silicon. A gap is a mental model, start to end.
+  A memorized definition builds a matrix multiply 7 times slower than a beginner loop a compiler
+  vectorized for free, and 15 times slower than a good hand model, on identical silicon. Hand SIMD
+  from a memorizer even tied a plain loop with no vector code -- effort spent, nothing gained. A
+  gap is a mental model, start to end.
 
   A struggle here carries famous company. A top high-performance course spends a whole week on
   ordering these loops. An author of a world's linear-algebra library co-wrote a paper on doing
