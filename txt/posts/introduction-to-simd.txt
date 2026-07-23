@@ -6,304 +6,363 @@
 ----------------------------------------------------------------------------------------------
 
   SPECIAL
-  Introduction to SIMD
+  Introduction to SIMD -- Experiment Log
   ============================================================================================
 
-
-  A machine holds one store of numbered words. A processor computes only on words already
-  sitting in a small set of registers, so every value travels first from store into a register
-  and every result travels back. A path between store and processor is narrow next to a
-  processor's arithmetic, and a width of a whole reckoning turns on how often a path is
-  crossed and how full each crossing runs. Store hands out words a block at a time, never a lone
-  word.
-
-  SIMD, single instruction multiple data, names one small addition to a picture above: a single
-  register can hold several words side by side in separate slots, and one instruction can act on
-  every slot at once.
-
-  One objective runs through a whole article, and one only: produce a single output number,
-  a top-left cell of a product of two square grids, named C00, and produce it CORRECTLY. Speed
-  is measured only after a right number is in hand. Every claim below waits for an experiment to
-  earn it.
+  Machine: AVX2, no AVX-512; a register holds 4 float64 or 8 float32. Compiler g++ 14.4.0.
+  Objective: produce C00, a top-left cell of a product of two square float32 grids, correctly;
+  measure cost only after a correct value is in hand.
+  Every entry reports: Objective, Data, Code, Build, Output (verbatim), Finding, Failure, Cause,
+  Next. Numbers are copied from runs. Files named per entry hold a full program.
 
   --------
-  ONE WORD
+  EXPERIMENT 01 -- addition of four words in one register (file: step1_add.c)
 
-  A processor already moves one word at a turn. A store hands a word to a register, an add
-  changes a register, a result returns to store. Nothing to gain from a lone word, because a
-  register was built to hold one and act on one. A next question follows on its own: a register
-  can hold several words -- so what happens when several ride together?
-
-  --------
-  ONE ROW OF WORDS
-
-  Four numbers at four consecutive addresses:
-
-      A: 1  2  3  4
-
-  Four more:
-
-      B: 10 20 30 40
-
-  A register holds four words in four slots. Load four of A, load four of B, add slot to slot:
-
-      [ 1][ 2][ 3][ 4]
-    + [10][20][30][40]
-    = [11][22][33][44]      one instruction, four sums
-
-  Correctness first. A one-at-a-turn version and a four-slot version, over a run of a thousand:
-
-      one-at-a-turn:   11 22 33 44 ...   agrees at every position
-      four-slot:       11 22 33 44 ...   agrees at every position
-
-  Zero disagreements. A four-slot add is a right add.
-
-  Only now, a clock, a run of a thousand added two thousand million turns, each built with -O0:
-
-      four-slot loop   =  3.7 s
-      one-at-a-turn    =  8.0 s
-
-      8.0 / 3.7 = ?
-
-  A next question: an add leaves four fresh words. What if a wanted answer is a single number
-  out of four?
+  Objective: confirm a four-word add yields a correct result.
+  Data: A = 1 2 3 4 ; B = 10 20 30 40.
+  Code:
+      __m128 r = _mm_add_ps(_mm_set_ps(4,3,2,1), _mm_set_ps(40,30,20,10));
+  Build: gcc -mavx2 -O0 -std=c99 step1_add.c -o step1
+  Output:
+      11 22 33 44 ; mismatches = 0 out of 32
+  Finding: a four-word add agrees with a one-word add at every index; 0 mismatches.
+  Failure: none.
+  Cause: n/a.
+  Next: measure a four-word add against a one-word loop.
 
   --------
-  MANY WORDS INTO ONE -- A SUM
+  EXPERIMENT 02 -- four-word add vs one-word loop, timed (file: compare_early.c)
 
-  Eight words, one wanted total:
-
-      1 2 3 4 5 6 7 8   ->   ?
-
-  A store cannot hand back a total; a register holds slots, not a sum. Load four, load four, add
-  slot to slot, and four running totals remain:
-
-      [1][2][3][4]
-    + [5][6][7][8]
-    = [6][8][10][12]      four totals, not one
-
-  Collapse four into one by hand, once, at an end:
-
-      6 + 8 + 10 + 12 = 36
-
-  Correctness: a one-at-a-turn total over eight words is also 36. Agreement. Only then, a clock,
-  a thousand words, built with -O0:
-
-      four-slot then one collapse  =  3.4 s
-      one-at-a-turn                =  10.3 s
-
-      10.3 / 3.4 = ?
-
-  A sum is two motions, not one: many cheap adds down a run, then one collapse across slots at an
-  end. A product asks a next question: does an operator matter?
+  Objective: cost of a four-word add relative to a one-word loop, correctness already held.
+  Data: two arrays of 1024 float32; 2,000,000 passes.
+  Code:
+      for (j=0;j+3<1024;j+=4) _mm_storeu_ps(&c[j], _mm_add_ps(_mm_loadu_ps(&a[j]),_mm_loadu_ps(&b[j])));
+      for (i=0;i<1024;i++)     c[i] = a[i] + b[i];
+  Build: gcc -mavx2 -O0 -std=c99 compare_early.c -o cmp
+  Output:
+      four-word 3.7 s ; one-word 8.0 s
+  Finding: four-word loop 3.7 s, one-word loop 8.0 s.
+  Failure: none.
+  Cause: one instruction serves four words; a one-word loop issues four instructions.
+  Next: reduce a run of words to a single number.
 
   --------
-  A PRODUCT, AND WHETHER AN OPERATOR MATTERS
+  EXPERIMENT 03 -- reduction of a run to one number (file: compare_early.c, step2_sum_timed.c)
 
-  Swap an add for a multiply across a run, then collapse with a multiply:
-
-      [1][2][3][4]
-    x [1][1][1][1]
-    = [1][2][3][4]         1 x 2 x 3 x 4 = 24
-
-  Correctness: 24 both ways. Then a clock, add against multiply, each two thousand million turns,
-  one operator moved:
-
-      four-slot add       =  3.7 s        four-slot multiply  =  3.4 s
-      one-at-a-turn add   =  8.0 s        one-at-a-turn mult  =  8.8 s
-
-      8.8 / 3.4 = ?        8.8 / 8.0 = ?
-
-  An operator is close to free. Feeding slots decides a clock, not a choice of add or multiply.
+  Objective: produce a single sum from a run of words, correct first.
+  Data: 1..8 for a hand check; 1024 float32 for timing.
+  Code:
+      __m128 p = _mm_add_ps(_mm_loadu_ps(&v[0]), _mm_loadu_ps(&v[4])); // 6 8 10 12
+      float t[4]; _mm_storeu_ps(t,p); sum = t[0]+t[1]+t[2]+t[3];        // one collapse
+  Build: gcc -mavx2 -O0 -std=c99 compare_early.c -o cmp
+  Output:
+      hand sum = 36 ; four-word 3.4 s ; one-word 10.3 s
+  Finding: 36 both ways; four-word 3.4 s, one-word 10.3 s.
+  Failure: none.
+  Cause: a register add produces four running totals, not one; a final collapse across four slots
+         runs once, at an end.
+  Next: replace an add operator with a multiply.
 
   --------
-  TWO ROWS
+  EXPERIMENT 04 -- product reduction (file: ladder_rungs.c)
 
-      A: [ 1][ 2][ 3][ 4]
-      B: [10][20][30][40]
-
-  Load four of A, load four of B, add:
-
-      = [11][22][33][44]
-
-  A single written line stacks four commands. Read it from an inside out:
-
-      load four of A into a register:  [ 1][ 2][ 3][ 4]
-      load four of B into a register:  [10][20][30][40]
-      add register to register:        [11][22][33][44]
-      copy a result register to store
-
-  Correctness: 11 22 33 44, agreeing with a one-at-a-turn version. A next question: a second row
-  was a fresh set of words; what about a lone constant added to a whole row?
+  Objective: confirm a reduction with a multiply operator is correct.
+  Data: 1 2 3 4 and 1 1 1 1.
+  Code:
+      __m128 p = _mm_mul_ps(_mm_loadu_ps(q), _mm_loadu_ps(r)); // 1 2 3 4
+      prod = t[0]*t[1]*t[2]*t[3];
+  Build: gcc -mavx2 -O2 -std=c99 ladder_rungs.c -o ladder
+  Output:
+      array product = 24
+  Finding: 1*2*3*4 = 24, correct.
+  Failure: none.
+  Cause: a reduction shape is fixed; only an operator changed.
+  Next: measure whether an operator changes cost.
 
   --------
-  ONE WORD COPIED INTO EVERY SLOT -- A CONSTANT
+  EXPERIMENT 05 -- add vs multiply cost (file: add_vs_mul.c, compare_early.c)
 
-      [1][2][3][4][5][6][7][8]
-    + [100 in every slot]
-    = [101][102][103][104][105][106][107][108]
-
-  Copying one word into every slot touches a store-processor path once, for one word; a rest is
-  register work. Correctness: 101 through 108 both ways. A clock, a thousand words, -O0:
-
-      four-slot with a copied word  =  3.3 s
-      one-at-a-turn                 =  7.3 s
-
-      7.3 / 3.3 = ?
-
-  Every experiment so far read words at consecutive addresses. A next experiment reads words far
-  apart, and a cost changes character.
+  Objective: cost difference between add and multiply.
+  Data: register-width float32, 2,000,000,000 passes (register form) and 1024-array form.
+  Code:
+      acc = _mm256_add_ps(acc, x);   // vs
+      acc = _mm256_mul_ps(acc, x);
+  Build: gcc -mavx2 -O2 -std=c99 add_vs_mul.c -o avm
+  Output:
+      add 2.484 s ; mul 2.453 s ; (array form) mul 3.4 s add 3.7 s ; one-word add 8.0 mul 8.8
+  Finding: add and multiply within noise of each other, both register forms and array forms.
+  Failure: none.
+  Cause: add and multiply have equal throughput on a target unit.
+  Next: add a single constant to a run.
 
   --------
-  WORDS FAR APART
+  EXPERIMENT 06 -- one word copied into every slot (file: compare_early.c, add_vs_mul.c)
 
-  Load four consecutive words: one crossing of a store-processor path delivers a whole block, and
-  a block already carries four side by side. Load four words at addresses far apart, computed one
-  at a turn, and a machine issues four separate requests, each dragging a whole block yet keeping
-  a single word.
-
-  Correctness first: a total of four far-apart words equals a total of four consecutive words when
-  a numbers match. So a right answer is reachable either way. A cost is not equal. Count processor
-  turns per operation across three reads of four numbers, differing only in how four addresses
-  form:
-
-      four consecutive, one request        1.35 turns
-      four consecutive, computed one-by-one 5.83 turns   <- identical four words
-      four far-apart, computed one-by-one   6.13 turns
-
-  A middle line settles it. Four identical consecutive words, requested one address at a turn,
-  cost four turns more than one request for a whole block. A slowness lives in a shape of a
-  request, not in a distance between words. A last line adds almost nothing on top.
-
-  A lesson, held for a matrix: read consecutive, and one crossing serves four; read words whose
-  addresses form one at a turn, and pay four crossings for four words.
+  Objective: add one constant to every word of a run, correct first.
+  Data: 1..8 plus 100; 1024-array for timing.
+  Code:
+      _mm256_storeu_ps(o, _mm256_add_ps(_mm256_loadu_ps(a), _mm256_set1_ps(100)));
+  Build: gcc -mavx2 -O0 -std=c99 compare_early.c -o cmp
+  Output:
+      101 102 103 104 105 106 107 108 ; four-word 3.3 s ; one-word 7.3 s
+  Finding: 101..108 correct; four-word 3.3 s, one-word 7.3 s.
+  Failure: none.
+  Cause: _mm256_set1_ps writes one word into every slot; a store path is touched once for one
+         word, a rest register-internal.
+  Next: read words whose addresses do not sit consecutive.
 
   --------
-  A GRID IN A STORE IS ONE LONG RUN
+  EXPERIMENT 07 -- one register load fills every slot (file: new_basic.c)
 
-  Two square grids, A and B, each a grid to a reader, one long run to a store. Row after row,
-  end to end:
-
-      B written out:  10 11 12 13 | 20 21 22 23 | 30 31 32 33 | 40 41 42 43
-      address:         0  1  2  3    4  5  6  7    8  9 10 11   12 13 14 15
-
-  An address of any cell:
-
-      address = row number * (count of columns) + column number
-
-  A row of B occupies consecutive addresses. A column of B does not: cell after cell down a
-  column sits a full row apart.
-
-      down column 0:  10 -> 20 -> 30 -> 40   =   address 0 -> 4 -> 8 -> 12
+  Objective: confirm _mm256_loadu_ps at one address delivers 8 words, not 1.
+  Data: A row 0 = 1..24 ; B column 0 = 1 (all).
+  Code:
+      __m256 va = _mm256_loadu_ps(&A[0*24 + k]);  // one written address
+      // acc printed slot-by-slot after each 8-step
+  Build: gcc -mavx2 -O2 -std=c99 new_basic.c -o nb
+  Output:
+      k= 0: 1 2 3 4 5 6 7 8 ; k= 8: 10 12 14 16 18 20 22 24 ; k=16: 27 30 33 36 39 42 45 48 ; C00=300
+  Finding: after step k=0 all 8 slots carry values 1..8; a lone load fills 8 slots.
+  Failure: none.
+  Cause: a 256-bit load reads 8 consecutive float32 from one start address.
+  Next: reproduce a load by 8 hand reads.
 
   --------
-  ONE CELL BY A FIRST, OBVIOUS ORGANIZATION
+  EXPERIMENT 08 -- 8 hand reads reproduce a load (file: new_basic_manual.c)
 
-  A grade-school rule for a top-left cell: take a first row of A, take a first column of B, pair
-  a first of a row with a first of a column, a second with a second, multiply each pair, add a
-  products.
-
-      row of A     1   2   3   4
-                   |   |   |   |
-      column of B  10  20  30  40
-      products     10  40  90  160  ->  add  ->  ...
-
-  A register holds four, not a whole row, so read four of A (a row, consecutive) and four of a
-  column of B, multiply slots, collapse. A column's four words sit at addresses 0, 4, 8, 12 --
-  far apart -- so four separate requests form four addresses one at a turn.
-
-  A worked example, eight wide, A's row 0 filled 1..8, B filled so every cell differs, only C00
-  wanted:
-
-      correct answer, checked against a one-at-a-turn total:   C00 = 2076
-
-  A obvious organization is CORRECT. 2076 both ways. Now a clock, a whole first row produced a
-  way, one cell at a turn, twenty million passes:
-
-      obvious organization (far-apart column, then collapse)  =  1.313 s
-
-  Correct, and heavy. A reason is already in hand: a column's words sit a row apart, so each cell
-  pays four crossings of a store-processor path, each crossing keeping a single word of a block,
-  followed by a collapse across slots, paid once a cell.
+  Objective: confirm _mm256_loadu_ps equals 8 explicit reads packed by _mm256_setr_ps.
+  Data: identical to Experiment 07.
+  Code:
+      __m256 va = _mm256_setr_ps(A[k+0],A[k+1],A[k+2],A[k+3],A[k+4],A[k+5],A[k+6],A[k+7]);
+  Build: gcc -mavx2 -O2 -std=c99 new_basic_manual.c -o nbm
+  Output:
+      k= 0: 1 2 3 4 5 6 7 8 ; ... ; C00 = 300
+  Finding: byte-for-byte identical to Experiment 07.
+  Failure: none.
+  Cause: _mm256_loadu_ps is 8 consecutive reads; _mm256_i32gather_ps is 8 reads at computed
+         addresses. Both fill 8 slots.
+  Next: fix which slot receives which written word.
 
   --------
-  WHERE AN OBVIOUS ORGANIZATION BREAKS EVEN ON A RIGHT ANSWER
+  EXPERIMENT 09 -- slot order of two pack instructions (file: set_vs_setr.c)
 
-  Slot position is physical. Two ways exist to load four chosen words into a register by hand:
-  one fills a top slot with a last written word, one fills a bottom slot with a first written
-  word. Fill A one way, B a other way, multiply, collapse, and correctness fails outright:
-
-      wanted C00           = 2076
-      reversed pack C00    = 1236        wrong
-
-  A reversed load pairs a last of A with a first of B. No warning, a right-looking program, a
-  wrong number. A store-back writes a bottom slot first, so a bottom slot must carry a first
-  column. A worked answer of 2076 survived earlier only because a checked pairing held; a moment
-  a pairing slips, a total rots. Correctness, again, comes before any clock.
-
-  --------
-  A CORRECT ORGANIZATION -- READ CONSECUTIVE, NEVER FORM ADDRESSES ONE AT A TURN
-
-  A obvious organization dragged a column, whose words sit far apart. A repair reads only
-  consecutive runs. Notice a first word of A, a value at row 0 column 0. A grade-school rule uses
-  a value against a first column of B for C00, but a identical value also multiplies a first
-  column of B, a second column, a third -- a whole first ROW of B contributes a first products of
-  C00, C01, C02, C03 at once.
-
-  So copy one word of A into every slot, and multiply against a consecutive ROW of B:
-
-      copied A value:  [ 1][ 1][ 1][ 1]
-      row 0 of B:      [10][11][12][13]
-      products:        [10][11][12][13]   ->  first pieces of C00 C01 C02 C03
-
-  Take a next word of A, a next ROW of B, add on top:
-
-      copied 2 x row 1 (20 21 22 23)  ->  50 53 56 59
-      copied 3 x row 2 (30 31 32 33)  ->  140 146 152 158
-      copied 4 x row 3 (40 41 42 43)  ->  300 310 320 330
-
-  Every read of B is a consecutive run, one crossing per four words. Each slot owns a separate
-  output cell, so slots never collapse. A store writes a finished run of C in one crossing.
-
-  Correctness first: a bottom slot holds C00, a right number, checked against a one-at-a-turn
-  total. And C01, C02, C03 fell out at no extra reading. Only then a clock, a whole first row,
-  twenty million passes:
-
-      obvious organization (far-apart column, then collapse)  =  1.313 s
-      correct organization (consecutive row, no collapse)     =  0.156 s
-      one-at-a-turn, no slots                                 =  0.718 s
-
-      1.313 / 0.156 = ?
+  Objective: record which slot receives a first written argument.
+  Data: arguments 0..7.
+  Code:
+      _mm256_set_ps (0,1,2,3,4,5,6,7);   _mm256_setr_ps(0,1,2,3,4,5,6,7);
+  Build: gcc -mavx2 -O2 -std=c99 set_vs_setr.c -o svs
+  Output:
+      set_ps  slots 0..7:  7 6 5 4 3 2 1 0
+      setr_ps slots 0..7:  0 1 2 3 4 5 6 7
+  Finding: _mm256_set_ps writes a last argument into slot 0; _mm256_setr_ps writes a first
+           argument into slot 0.
+  Failure: none.
+  Cause: two documented orderings.
+  Next: measure a wrong-order effect on a product.
 
   --------
-  EVERY ROAD TO C00, TOGETHER
+  EXPERIMENT 10 -- mixed pack orders corrupt a product (file: simd_trap.c)
 
-  One store of numbers, one path to a processor. Four roads to a top-left cell, correctness first,
-  a clock after:
-
-      one-at-a-turn                          C00 = 2076   correct     0.718 s
-      obvious, far-apart column + collapse   C00 = 2076   correct     1.313 s
-      reversed pack                          C00 = 1236   WRONG        --
-      correct, consecutive row, no collapse  C00 = 2076   correct     0.156 s
-                                                          + C01 C02 C03 at no extra cost
-
-  A correct organization runs ahead of a one-at-a-turn version and far ahead of a obvious
-  organization, on identical arithmetic. Identical multiplies, identical adds, in every road; a
-  clock turned on how a store was touched. A consecutive run fills a block and crosses a path
-  once for four words. A far-apart column crosses a path four times and keeps a single word of
-  four blocks. A collapse across slots is extra work, paid a cell.
-
-  A obvious organization used real SIMD instructions and still lost, because knowing a set of
-  instructions is not a difficult part. A difficult part is an organization of words in a store,
-  so a processor reads consecutive runs and never forms addresses one at a turn, and so every
-  slot carries a separate answer and no slot collapses. A grade-school column, laid into a store,
-  scatters; a row lies consecutive. Read a row.
+  Objective: correctness of a product when one operand packed by set_ps, one by setr_ps.
+  Data: A = 10 20 30 40 50 60 70 80 ; B = 1 2 3 4 5 6 7 8.
+  Code:
+      va = _mm256_set_ps (A[0]..A[7]);   vb = _mm256_setr_ps(B[0]..B[7]);
+      r  = _mm256_mul_ps(va, vb);
+  Build: gcc -O3 -mavx2 -std=c99 simd_trap.c -o simd_trap
+  Output:
+      slot0 va80 vb1 =80 ; slot1 70x2=140 ; ... ; wanted 10 40 90 160 250 360 490 640
+                                                got    80 140 180 200 200 180 140 80
+  Finding: products wrong at every slot; program compiles and runs without error.
+  Failure: pairing A[7] with B[0] instead of A[0] with B[0].
+  Cause: set_ps reversed one operand relative to setr_ps.
+  Next: measure a cost of forming addresses one at a turn.
 
   --------
-  A LAW UNDER EVERY MEASUREMENT
+  EXPERIMENT 11 -- cost of a request formed one address at a turn (file: step8_why_gather_slow.c)
 
-  A processor is quick, a store is slow, a path between carries words a block at a time. A fastest
-  road crosses a path fewest times and fills each crossing. Contiguous reads spend a whole block;
-  far-apart reads waste most of a block; a slot-collapse is a surcharge. Arithmetic width and slot
-  order matter, but a path decides a clock -- and a right number decides whether a clock is worth
-  reading at all.
+  Objective: separate cost of address distance from cost of request form.
+  Data: register-width float32; three read forms; cycles per operation via rdtsc.
+  Code:
+      _mm256_loadu_ps(&a[b]);                                   // consecutive, one request
+      _mm256_i32gather_ps(a, setr_epi32(b+0..b+7), 4);          // consecutive, 8 computed
+      _mm256_i32gather_ps(a, setr_epi32(b,b+16,...), 4);        // far, 8 computed
+  Build: gcc -mavx2 -O2 -std=c99 step8_why_gather_slow.c -o step8
+  Output:
+      consecutive one-request 1.35 ; consecutive 8-computed 5.83 ; far 8-computed 6.13 ; delta 4.47
+  Finding: 8 computed reads of identical consecutive words cost 4.47 cycles above one request;
+           distance adds 0.30.
+  Failure: none.
+  Cause: _mm256_i32gather_ps decomposes into 8 word requests, roughly one per cycle.
+  Next: measure a full read at two build settings.
+
+  --------
+  EXPERIMENT 12 -- build setting reverses a verdict (files: step3_gather_slow.c, step4_plain_beats_gather.c)
+
+  Objective: cost of an 8-computed-address read vs a one-word loop, at -O0 and -O2.
+  Data: 64-word reduction, 20,000,000 passes.
+  Build: gcc -mavx2 -O0 ... ; then gcc -mavx2 -O2 ...
+  Output:
+      -O0: loop 3.578 ; 8-computed 2.875
+      -O2: loop 0.750 ; 8-computed 1.187
+  Finding: at -O0 an 8-computed read is ahead; at -O2 a one-word loop is ahead.
+  Failure: a -O0 measurement inverts a -O2 result.
+  Cause: at -O0 a loop carries index and bound overhead; a -O2 loop drops it. A measurement at
+         -O0 is not a report of shipped cost.
+  Next: measure effect of word values below normal range.
+
+  --------
+  EXPERIMENT 13 -- values below normal range (file: step5_denormals.c)
+
+  Objective: cost of arithmetic on subnormal float values, default vs flush-to-zero.
+  Data: array of 1e-310 (subnormal).
+  Code:
+      _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+  Build: gcc -mavx2 -O0 -std=c99 step5_denormals.c -o step5
+  Output:
+      default 0.265 s ; flush-to-zero 0.250 s
+  Finding: no difference on a test machine.
+  Failure: none reproduced here.
+  Cause: a test machine handles subnormals on a fast path; a penalty (100-200 cycles/op) is
+         documented on other machines. A binary correct here can run far slower elsewhere.
+  Next: measure effect of a data set larger than cache.
+
+  --------
+  EXPERIMENT 14 -- a data set larger than cache (file: step7_memory_wall.c)
+
+  Objective: throughput of a streaming add inside cache vs past cache.
+  Data: small array in cache; 64 MB per operand past cache. GB/s.
+  Build: gcc -mavx2 -O2 -fno-tree-vectorize -std=c99 step7_memory_wall.c -o step7
+  Output:
+      inside cache: one-word 76.7 ; four-word 88.6
+      past cache:   one-word 16.8 ; four-word 43.0
+  Finding: past cache a four-word read is 2.56x a one-word read; inside cache 1.16x. A gap widens
+           past cache. Peak fell 89 -> 43 past cache.
+  Failure: a prediction of width no longer helping past cache is not observed.
+  Cause: a one-word loop cannot issue block requests fast enough to fill a memory path; a wide
+         read does. Absolute throughput halves past cache for both.
+  Next: measure a reduction folded on every step vs once.
+
+  --------
+  EXPERIMENT 15 -- reduction folded per step vs once (file: step6_reduce_too_often.c)
+
+  Objective: cost of a slot collapse placed on every 4-read vs once at an end.
+  Data: 64-word reduction.
+  Build: gcc -mavx2 -O0 -std=c99 step6_reduce_too_often.c -o step6
+  Output:
+      one-word loop 2.937 ; collapse once 1.531 ; collapse per step 3.610
+  Finding: collapse-per-step 3.610 s, slower than a one-word loop 2.937 s; collapse-once 1.531 s.
+  Failure: collapse-per-step erases a width gain.
+  Cause: a cross-slot collapse (shuffle plus add) is fixed overhead; once at an end is cheap, on
+         every read it dominates.
+  Next: apply findings to C00.
+
+  --------
+  EXPERIMENT 16 -- C00 by a column read (files: c00_my_model.c, c00_dot_product_simd.c)
+
+  Objective: C00 correct by reading a row of A and a column of B.
+  Data: 4x4 grids; A row 0 = 1 2 3 4; B column 0 = 10 20 30 40.
+  Code:
+      __m128  rowreg = _mm_loadu_ps(&A[0]);              // 1 2 3 4, consecutive
+      __m128i idx    = _mm_setr_epi32(0,4,8,12);         // column 0 at 0,4,8,12
+      __m128  colreg = _mm_i32gather_ps(B, idx, 4);      // 8 words at computed addresses
+      acc = _mm_add_ps(acc, _mm_mul_ps(rowreg, colreg));
+      c00 = t[0]+t[1]+t[2]+t[3];
+  Build: gcc -mavx2 -O2 -std=c99 c00_my_model.c -o c00
+  Output:
+      C00 = 300
+  Finding: 300, correct.
+  Failure: none for correctness.
+  Cause: a column of B sits at addresses 0,4,8,12, a full row apart; a read forms 4 addresses one
+         at a turn, then a collapse produces one cell.
+  Next: remove a far-apart read.
+
+  --------
+  EXPERIMENT 17 -- flip a grid to remove a far-apart read (file: race_transpose.c)
+
+  Objective: cost of C00 after writing B transposed once, so a column becomes consecutive.
+  Data: 256x256; 200 passes.
+  Build: gcc -mavx2 -O2 -std=c99 race_transpose.c -o racet
+  Output:
+      column read + collapse 3.9 s ; transpose once then read 0.30 s
+  Finding: 3.9 s -> 0.30 s from writing B transposed once and reading consecutive.
+  Failure: none; a collapse per cell remains.
+  Cause: a cost was a far-apart read, removed by a one-pass rewrite; arithmetic unchanged.
+  Next: remove a collapse.
+
+  --------
+  EXPERIMENT 18 -- C00 by a consecutive row read, no collapse (file: c0_row_broadcast_simd.c)
+
+  Objective: C00 correct by copying one word of A into slots and reading a consecutive row of B.
+  Data: 4x4; A row 0 = 1 2 3 4; B rows 10..13, 20..23, 30..33, 40..43.
+  Code:
+      __m128 a = _mm_set1_ps(A[k]);                 // one A word in every slot
+      __m128 b = _mm_loadu_ps(&B[k*4]);             // a consecutive row of B
+      acc = _mm_add_ps(acc, _mm_mul_ps(a, b));      // no collapse
+  Build: gcc -mavx2 -O2 -std=c99 c0_row_broadcast_simd.c -o c0row
+  Output:
+      C00 C01 C02 C03 = 300 310 320 330
+  Finding: C00 = 300 correct; C01 C02 C03 produced at no extra read.
+  Failure: none.
+  Cause: every slot owns a separate cell, so no collapse; every read of B consecutive.
+  Next: measure a full grid across every organization.
+
+  --------
+  EXPERIMENT 19 -- full grid, four builds (file: race_matmul.c)
+
+  Objective: cost of a full 256x256 product, four builds, all checked equal per cell.
+  Data: 256x256; 200 passes; check C00 and C11 agree across builds.
+  Build: gcc -mavx2 -O2 -std=c99 race_matmul.c -o race
+  Output:
+      check C00: 3045 3045 3045 3045
+      one-word, no width      = 3.6 s
+      one-word loop at -O2    = 0.52 s
+      column read + collapse  = 3.9 s
+      consecutive row, no collapse = 0.25 s
+  Finding: all four correct at 3045; column-read organization 3.9 s, slower than a one-word loop
+           at -O2 0.52 s; consecutive-row organization 0.25 s, ahead of every other.
+  Failure: a column-read organization, built from correct instructions, is slowest of correct
+           builds.
+  Cause: a column read forms far-apart addresses and collapses per cell; a one-word loop at -O2
+         reads consecutive; a consecutive-row organization reads consecutive and never collapses.
+  Next: consolidate C00 correctness and cost in one program.
+
+  --------
+  EXPERIMENT 20 -- consolidated C00, correctness then cost (file: simd_all.c)
+
+  Objective: one program, correctness of every C00 method, then cost of correct methods.
+  Data: 8x8; A row 0 = 1..8; B[i][j] = (i+1)*10 + (j+1); 20,000,000 passes for a first row.
+  Build: gcc -mavx2 -O2 -std=c99 simd_all.c -o simd_all
+  Output:
+      scalar C00        = 2076
+      column read C00   = 2076   correct
+      reversed pack C00 = 1236   WRONG
+      consecutive row   = 2076   correct ; C01..C07 = 2112 2148 2184 2220 2256 2292 2328
+      first row cost: one-word 0.718 ; column read + collapse 1.313 ; consecutive row 0.156
+  Finding: three methods correct at 2076; reversed pack wrong at 1236. Consecutive-row cost
+           0.156 s, 8.4x under a column-read method 1.313 s, and returns C01..C07 at no extra read.
+  Failure: reversed pack produced a wrong value.
+  Cause: a column read forms far-apart addresses and collapses per cell; a consecutive-row method
+         reads consecutive and holds a separate cell per slot; a reversed pack paired wrong slots.
+  Next: none; a correct minimum-cost organization stands.
+
+  ============================================================================================
+  SUMMARY OF FINDINGS
+
+  1. A wide instruction acts on 4 or 8 words at once and is correct (Exp 01-06).
+  2. A load at one address delivers 8 consecutive words; equal to 8 hand reads (Exp 07-08).
+  3. Slot position is physical; a reversed pack corrupts a product with no error (Exp 09-10).
+  4. A request formed one address at a turn costs ~4 extra cycles regardless of distance (Exp 11).
+  5. A cost measurement at -O0 can invert a -O2 result (Exp 12).
+  6. Subnormal values carry a machine-dependent penalty, absent on a test machine (Exp 13).
+  7. Past cache a wide read reaches higher throughput than a one-word loop; absolute peak halves
+     (Exp 14).
+  8. A slot collapse placed per step erases a width gain (Exp 15).
+  9. C00 is correct by a column read, and slow; correct and fast by a consecutive row read
+     holding a separate cell per slot (Exp 16-20). Column read + collapse 3.9 s; consecutive row
+     0.25 s on a 256x256 grid; both correct at 3045.
+
+  A limiting cost across every experiment is a count of store-to-processor crossings and a
+  fraction of each block used. Consecutive reads fill a block; reads at computed far-apart
+  addresses waste most of a block; a slot collapse is added overhead. Correct instructions are
+  necessary and not sufficient; an organization of words in a store decides both correctness of
+  slot pairing and cost.
